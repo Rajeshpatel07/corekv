@@ -4,5 +4,5 @@ project("corekv")
 set(CXX_MINIMUM_STANDARD 17)
 set(CXX_STANDARD_REQUIRED ON)
 
-add_executable(corekv-server server.cpp)
+add_executable(corekv-server server.cpp utils/socket.hpp utils/socket.cpp)
 add_executable(corekv-client client.cpp)

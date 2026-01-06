@@ -6,6 +6,7 @@
 #include <string>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <vector>
 
 bool handle_read(int fd, std::string &buffer) {
   char header[4];
@@ -15,6 +16,8 @@ bool handle_read(int fd, std::string &buffer) {
   while (header_size > 0) {
     int rv = read(fd, ptr, header_size);
     if (rv <= 0) {
+
+      std::cout << "wt errno: " << rv << std::endl;
       perror("read header:");
       return false;
     }
@@ -55,6 +58,7 @@ bool handle_write(int fd, std::string &msg) {
   while (header_size > 0) {
     int wt = write(fd, ptr, header_size);
     if (wt <= 0) {
+      std::cout << "wt errno: " << wt << std::endl;
       perror("write header: ");
       return false;
     }
@@ -91,25 +95,21 @@ int main() {
     exit(1);
   }
 
-  std::string input;
-  while (true) {
-    std::cout << "enter message: ";
-    std::getline(std::cin, input);
+  std::vector<std::string> query_list = {
+      std::string(32 << 22, 'z'),
+  };
 
-    if (!handle_write(fd, input)) {
-      perror("writing::");
-      continue;
-    }
-
-    if (input == "exit") {
-      std::cout << "Connection closed...." << std::endl;
-      break;
-    }
-    if (!handle_read(fd, input)) {
-      perror("Reading:: ");
-      continue;
+  for (std::string &s : query_list) {
+    if (!handle_write(fd, s)) {
+      std::cerr << "Error while writting..." << std::endl;
     }
   }
 
+  std::string buffer;
+  for (uint32_t i = 0; i < query_list.size(); i++) {
+    if (!handle_read(fd, buffer)) {
+      std::cerr << "Error while reading..." << std::endl;
+    }
+  }
   close(fd);
 }
