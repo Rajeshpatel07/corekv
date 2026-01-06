@@ -1,3 +1,4 @@
+#include "utils/parser.hpp"
 #include "utils/socket.hpp"
 #include <arpa/inet.h>
 #include <asm-generic/socket.h>
@@ -12,6 +13,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <unordered_map>
 #include <vector>
 
 class Conn {
@@ -23,6 +25,8 @@ public:
   std::vector<uint8_t> incomming;
   std::vector<uint8_t> outgoing;
 };
+
+std::unordered_map<std::string, std::string> store;
 
 Conn *handle_accept(int fd) {
   sockaddr_in client;
@@ -56,8 +60,8 @@ bool parse_message(Conn *conn) {
   }
 
   uint32_t header;
-  memcpy(&header, conn->incomming.data(), 4);
-  header = ntohl(header);
+  read_u32(conn->incomming, header, 4);
+
   int k_max_size = 32 << 22;
 
   if (header > k_max_size) {

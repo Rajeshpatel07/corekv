@@ -1,3 +1,5 @@
+#include "utils/parser.hpp"
+#include <algorithm>
 #include <arpa/inet.h>
 #include <cstdio>
 #include <cstring>
@@ -8,74 +10,108 @@
 #include <unistd.h>
 #include <vector>
 
+void trim(std::string &str) {
+
+  for (int i = str.size() - 1; i >= 0; i--) {
+    if (str[i] == ' ') {
+      str.pop_back();
+    } else {
+      break;
+    }
+  }
+  std::reverse(str.begin(), str.end());
+  for (int i = str.size() - 1; i >= 0; i--) {
+    if (str[i] == ' ') {
+      str.pop_back();
+    } else {
+      break;
+    }
+  }
+  std::reverse(str.begin(), str.end());
+}
+
+void split(std::string &src, std::vector<std::string> &dist, char delimiter) {
+
+  std::string tmp = "";
+  for (size_t i = 0; i < src.size(); i++) {
+    if (src[i] == ' ') {
+      dist.push_back(tmp);
+      tmp = "";
+    } else {
+      tmp += src[i];
+    }
+  }
+  dist.push_back(tmp);
+}
+
 bool handle_read(int fd, std::string &buffer) {
+
   char header[4];
-
-  int header_size = 4;
   char *ptr = header;
-  while (header_size > 0) {
-    int rv = read(fd, ptr, header_size);
-    if (rv <= 0) {
 
-      std::cout << "wt errno: " << rv << std::endl;
-      perror("read header:");
+  int head_size = 4;
+  while (head_size > 0) {
+    int rv = read(fd, ptr, head_size);
+    if (rv <= 0) {
+      perror("read: ");
       return false;
     }
-
     ptr += rv;
-    header_size -= rv;
+    head_size -= rv;
   }
 
-  uint32_t body_size;
-  memcpy(&body_size, header, 4);
-  body_size = ntohl(body_size);
+  uint32_t payload_size;
+  memcpy(&payload_size, header, 4);
+  payload_size = ntohl(payload_size);
 
-  buffer.resize(body_size);
-  ptr = &buffer[0];
-  while (body_size > 0) {
-    int rv = read(fd, ptr, body_size);
+  buffer.resize(payload_size);
+
+  ptr = buffer.data();
+
+  while (payload_size > 0) {
+    int rv = read(fd, ptr, payload_size);
     if (rv <= 0) {
-      perror("read header:");
+      perror("read: ");
       return false;
     }
-    body_size -= rv;
     ptr += rv;
+    payload_size -= rv;
   }
-
-  std::cout << "server: " << buffer << std::endl;
 
   return true;
 }
 
 bool handle_write(int fd, std::string &msg) {
-  int body_size = htonl(msg.size());
-  char header[4];
-  memcpy(header, &body_size, 4);
+  trim(msg);
+  std::vector<std::string> cmd;
+  split(msg, cmd, ' ');
 
-  // Send header
-  size_t header_size = 4;
-  const char *ptr = header;
-  while (header_size > 0) {
-    int wt = write(fd, ptr, header_size);
-    if (wt <= 0) {
-      std::cout << "wt errno: " << wt << std::endl;
-      perror("write header: ");
-      return false;
-    }
-    ptr += wt;
-    header_size -= wt;
+  std::string payload = "";
+
+  for (std::string s : cmd) {
+    uint32_t len = s.size();
+    len = htonl(len);
+    payload += len;
+    payload += s;
   }
 
-  body_size = msg.size();
-  ptr = msg.data();
-  while (body_size > 0) {
-    int wt = write(fd, ptr, body_size);
+  uint32_t full_len = htonl(payload.size());
+  std::string final_payload = "";
+  final_payload += full_len;
+  final_payload += payload;
+
+  size_t size = final_payload.size();
+  char *ptr = final_payload.data();
+
+  while (size > 0) {
+    int wt = write(fd, ptr, size);
     if (wt <= 0) {
       perror("write: ");
       return false;
     }
+
     ptr += wt;
-    body_size -= wt;
+    size -= wt;
   }
 
   return true;
@@ -95,9 +131,7 @@ int main() {
     exit(1);
   }
 
-  std::vector<std::string> query_list = {
-      std::string(32 << 22, 'z'),
-  };
+  std::vector<std::string> query_list = {"set name jack", "get name"};
 
   for (std::string &s : query_list) {
     if (!handle_write(fd, s)) {
