@@ -28,6 +28,23 @@ public:
 
 std::unordered_map<std::string, std::string> store;
 
+void execute_cmd(std::vector<std::string> &cmd, Conn *conn) {
+  std::string res = "";
+  if (cmd.size() == 2 && cmd[0] == "get") {
+    res = store.count(cmd[1]) ? store[cmd[1]] : "nil";
+  } else if (cmd.size() == 3 && cmd[0] == "set") {
+    store[cmd[1]] = cmd[2];
+    res = "ok";
+  } else if (cmd.size() == 2 && cmd[0] == "del") {
+    store.erase(cmd[1]);
+    res = "ok";
+  } else {
+    res = "invalid command";
+  }
+  generate_response(conn->outgoing, res);
+  return;
+}
+
 Conn *handle_accept(int fd) {
   sockaddr_in client;
   socklen_t len = sizeof(client);
@@ -73,9 +90,10 @@ bool parse_message(Conn *conn) {
     return false;
   }
 
-  add_to_buffer(conn->outgoing, conn->incomming.data(), 4);
-  add_to_buffer(conn->outgoing, &conn->incomming[4], header);
-  rm_from_buffer(conn->incomming, 4 + header);
+  std::vector<std::string> cmd;
+  rm_from_buffer(conn->incomming, 4);
+  get_cmds(conn->incomming, cmd, header);
+  execute_cmd(cmd, conn);
 
   return true;
 }
@@ -109,9 +127,9 @@ void handle_read(Conn *conn) {
 }
 
 void handle_write(Conn *conn) {
-  int wt = write(conn->fd, conn->outgoing.data(), conn->outgoing.size());
 
-  if (wt < 0) {
+  int wt = write(conn->fd, conn->outgoing.data(), conn->outgoing.size());
+  if (wt <= 0) {
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
       return;
     }
@@ -121,7 +139,7 @@ void handle_write(Conn *conn) {
 
   if (wt > 0) {
     rm_from_buffer(conn->outgoing, wt);
-    handle_write(conn);
+    // handle_write(conn);
   }
 
   if (conn->outgoing.empty()) {
@@ -134,8 +152,9 @@ int main() {
   int server = socket(AF_INET, SOCK_STREAM, 0);
 
   int opt = 1;
-
+  int alive = 1;
   setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+  setsockopt(server, SOL_SOCKET, SO_KEEPALIVE, &alive, sizeof(alive));
 
   sockaddr_in serveraddr;
   serveraddr.sin_family = AF_INET;

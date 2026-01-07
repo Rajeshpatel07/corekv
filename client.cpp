@@ -1,4 +1,3 @@
-#include "utils/parser.hpp"
 #include <algorithm>
 #include <arpa/inet.h>
 #include <cstdio>
@@ -89,16 +88,20 @@ bool handle_write(int fd, std::string &msg) {
   std::string payload = "";
 
   for (std::string s : cmd) {
-    uint32_t len = s.size();
-    len = htonl(len);
-    payload += len;
+    uint32_t len = htonl(s.size());
+    char head[4];
+    memcpy(&head, &len, 4);
+    payload.insert(payload.end(), head, head + 4);
     payload += s;
   }
 
   uint32_t full_len = htonl(payload.size());
-  std::string final_payload = "";
-  final_payload += full_len;
-  final_payload += payload;
+  char head[4];
+  memcpy(&head, &full_len, 4);
+
+  std::string final_payload;
+  final_payload.insert(final_payload.end(), head, head + 4);
+  final_payload.insert(final_payload.end(), payload.begin(), payload.end());
 
   size_t size = final_payload.size();
   char *ptr = final_payload.data();
@@ -123,7 +126,7 @@ int main() {
   sockaddr_in address;
   memset(&address, 0, sizeof(address));
   address.sin_family = AF_INET;
-  address.sin_port = ntohs(8000);
+  address.sin_port = htons(8000);
   inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
 
   if (connect(fd, (sockaddr *)&address, sizeof(address)) < 0) {
@@ -131,19 +134,26 @@ int main() {
     exit(1);
   }
 
-  std::vector<std::string> query_list = {"set name jack", "get name"};
+  std::cout << "NOTE: only get, set and del commands are availabel..\n";
+  while (true) {
+    std::cout << "> ";
+    std::string input;
+    std::getline(std::cin, input);
 
-  for (std::string &s : query_list) {
-    if (!handle_write(fd, s)) {
+    if (input == "exit") {
+      break;
+    }
+
+    if (!handle_write(fd, input)) {
       std::cerr << "Error while writting..." << std::endl;
     }
-  }
 
-  std::string buffer;
-  for (uint32_t i = 0; i < query_list.size(); i++) {
+    std::string buffer;
     if (!handle_read(fd, buffer)) {
       std::cerr << "Error while reading..." << std::endl;
     }
+    std::cout << buffer << std::endl;
   }
+
   close(fd);
 }

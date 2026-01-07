@@ -15,6 +15,4 @@ utils/parser.cpp
 add_executable(
 corekv-client
 client.cpp
-utils/parser.hpp
-utils/parser.cpp
 )
