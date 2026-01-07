@@ -228,4 +228,5 @@ int main() {
     }
   }
   close(server);
+  return 0;
 }
