@@ -1,5 +1,6 @@
-#include "utils/parser.hpp"
-#include "utils/socket.hpp"
+#include "src/hashtable.hpp"
+#include "src/utils/parser.hpp"
+#include "src/utils/socket.hpp"
 #include <arpa/inet.h>
 #include <asm-generic/socket.h>
 #include <cerrno>
@@ -13,7 +14,6 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-#include <unordered_map>
 #include <vector>
 
 class Conn {
@@ -26,17 +26,69 @@ public:
   std::vector<uint8_t> outgoing;
 };
 
-std::unordered_map<std::string, std::string> store;
+struct {
+  HMap db; // Global database hashmap for key-value storage
+} store;
+
+// Retrieve the value for a given key from the database
+std::string do_get(std::vector<std::string> &cmd) {
+  Entry dummy;
+  dummy.key.swap(cmd[1]);
+
+  dummy.node.hcode = hash((uint8_t *)dummy.key.data(), dummy.key.size());
+
+  HNode *node = hmap_lookup(&store.db, &dummy.node);
+  if (!node) {
+    return "nil";
+  }
+
+  Entry *data = container_of(node, Entry, node);
+
+  return data->val;
+}
+
+// Set or update the value for a given key in the database
+void do_set(std::vector<std::string> &cmd) {
+  Entry dummy;
+  dummy.key.swap(cmd[1]);
+
+  dummy.node.hcode = hash((uint8_t *)dummy.key.data(), dummy.key.size());
+
+  HNode *node = hmap_lookup(&store.db, &dummy.node);
+
+  if (node) {
+    Entry *data = container_of(node, Entry, node);
+    data->val.swap(cmd[2]);
+  } else {
+    Entry *newEntry = new Entry();
+    newEntry->key.swap(dummy.key);
+    newEntry->val.swap(cmd[2]);
+    newEntry->node.hcode = dummy.node.hcode;
+    hmap_insert(&store.db, &newEntry->node);
+  }
+}
+
+// Delete a key-value pair from the database
+void do_del(std::vector<std::string> &cmd) {
+  Entry dummy;
+  dummy.key.swap(cmd[1]);
+  dummy.node.hcode = hash((uint8_t *)dummy.key.data(), dummy.key.size());
+
+  HNode *node = hmap_delete(&store.db, &dummy.node);
+  if (node) { // deallocate the pair
+    delete container_of(node, Entry, node);
+  }
+}
 
 void execute_cmd(std::vector<std::string> &cmd, Conn *conn) {
   std::string res = "";
   if (cmd.size() == 2 && cmd[0] == "get") {
-    res = store.count(cmd[1]) ? store[cmd[1]] : "nil";
+    res = do_get(cmd);
   } else if (cmd.size() == 3 && cmd[0] == "set") {
-    store[cmd[1]] = cmd[2];
+    do_set(cmd);
     res = "ok";
   } else if (cmd.size() == 2 && cmd[0] == "del") {
-    store.erase(cmd[1]);
+    do_del(cmd);
     res = "ok";
   } else {
     res = "invalid command";
@@ -149,6 +201,10 @@ void handle_write(Conn *conn) {
 }
 
 int main() {
+  // Initialize the database hashtable to prevent null pointer issues during
+  // lookups
+  h_init(&store.db.newer, 4);
+
   int server = socket(AF_INET, SOCK_STREAM, 0);
 
   int opt = 1;
