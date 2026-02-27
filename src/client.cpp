@@ -62,31 +62,27 @@ bool handle_read(int fd, std::string &buffer) {
   memcpy(&net_len, header, 4);
   uint32_t payload_size = ntohl(net_len);
 
-  if (payload_size > 10 * 1024 * 1024) {
-    std::cerr << "Packet too large: " << payload_size << " bytes." << std::endl;
-    return false;
-  }
+  // if (payload_size > 10 * 1024 * 1024) {
+  //   std::cerr << "Packet too large: " << payload_size << " bytes." <<
+  //   std::endl; return false;
+  // }
 
   buffer.resize(payload_size);
+  ptr = &buffer[0];
+  while (payload_size > 0) {
+    int rv = read(fd, ptr, payload_size);
 
-  if (payload_size > 0) {
-    ptr = &buffer[0];
-
-    while (payload_size > 0) {
-      int rv = read(fd, ptr, payload_size);
-
-      if (rv < 0) {
-        perror("read body");
-        return false;
-      }
-      if (rv == 0) {
-        std::cerr << "Server closed connection during body read." << std::endl;
-        return false;
-      }
-
-      ptr += rv;
-      payload_size -= rv;
+    if (rv < 0) {
+      perror("read body");
+      return false;
     }
+    if (rv == 0) {
+      std::cerr << "Server closed connection during body read." << std::endl;
+      return false;
+    }
+
+    ptr += rv;
+    payload_size -= rv;
   }
 
   return true;

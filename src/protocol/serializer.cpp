@@ -1,5 +1,6 @@
 #include "serializer.hpp"
 
+#include <cstdint>
 #include <cstring>
 #include <netinet/in.h>
 
@@ -33,7 +34,8 @@ void readMessage(std::vector<uint8_t> &src, std::string &msg, uint32_t size) {
   msg.assign(src.begin(), src.begin() + size);
 }
 
-void parseCommands(std::vector<uint8_t> &src, std::vector<std::string> &cmds, int totalSize) {
+void parseCommands(std::vector<uint8_t> &src, std::vector<std::string> &cmds,
+                   int totalSize) {
   int processed = 0;
   while (processed < totalSize && src.size() >= 4) {
     uint32_t cmdSize;
@@ -56,8 +58,63 @@ void parseCommands(std::vector<uint8_t> &src, std::vector<std::string> &cmds, in
 void generateResponse(std::vector<uint8_t> &dest, const std::string &res) {
   uint32_t len = htonl(static_cast<uint32_t>(res.size()));
   auto *head = reinterpret_cast<uint8_t *>(&len);
-  dest.insert(dest.end(), head, head + 4);
-  dest.insert(dest.end(), res.begin(), res.end());
+
+  appendToBuffer(dest, head, 4);
+  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(res.data()),
+                 (int)res.size());
+}
+
+void addTagNil(std::vector<uint8_t> &dest) {
+
+  uint8_t tag = TAG_NIL;
+  appendToBuffer(dest, &tag, sizeof(tag));
+}
+
+void addTagStr(std::vector<uint8_t> &dest, const uint8_t *data, int size) {
+  uint8_t tag = TAG_STR;
+  appendToBuffer(dest, &tag, sizeof(tag));
+
+  uint32_t size_be = htonl(static_cast<uint32_t>(size));
+  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&size_be), 4);
+  appendToBuffer(dest, data, size);
+}
+
+void addTagErr(std::vector<uint8_t> &dest, const std::string msg) {
+  uint8_t tag = TAG_ERR;
+  appendToBuffer(dest, &tag, sizeof(tag));
+
+  uint32_t size_be = htonl(static_cast<uint32_t>(msg.size()));
+  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&size_be), 4);
+  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(msg.data()),
+                 msg.size());
+}
+
+void addTagInt(std::vector<uint8_t> &dest, int val) {
+  uint8_t tag = TAG_INT;
+  appendToBuffer(dest, &tag, sizeof(tag));
+  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&val), 4);
+}
+
+void addTagLong(std::vector<uint8_t> &dest, long val) {
+  uint8_t tag = TAG_LONG;
+  appendToBuffer(dest, &tag, sizeof(tag));
+  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&val), 8);
+}
+
+void addTagDbl(std::vector<uint8_t> &dest, double val) {
+  uint8_t tag = TAG_DBL;
+  appendToBuffer(dest, &tag, sizeof(tag));
+  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&val), 8);
+}
+
+void addTagArr(std::vector<uint8_t> &dest, uint32_t len) {
+  uint8_t tag = TAG_ARR;
+  appendToBuffer(dest, &tag, sizeof(tag));
+
+  uint32_t len_be = htonl(len);
+  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&len_be), 4);
+  // Remove this line - it's wrong (raw len instead of empty array data):
+  // appendToBuffer(dest, reinterpret_cast<const uint8_t*>(&len), 4);
 }
 
 } // namespace corekv

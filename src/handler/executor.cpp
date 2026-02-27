@@ -5,24 +5,32 @@
 
 namespace corekv {
 
-static std::string doGet(const std::vector<std::string> &cmds) {
+static void doGet(const std::vector<std::string> &cmds,
+                  std::vector<uint8_t> &dest) {
   Entry dummy;
   dummy.key = cmds[1];
-  dummy.node.hcode = hash(reinterpret_cast<const uint8_t *>(dummy.key.data()), dummy.key.size());
+  dummy.node.hcode = hash(reinterpret_cast<const uint8_t *>(dummy.key.data()),
+                          dummy.key.size());
 
   HNode *node = hmapLookup(&db.store, &dummy.node);
   if (!node) {
-    return "nil";
+    const std::string res = "nil";
+    addTagStr(dest, reinterpret_cast<const uint8_t *>(res.data()), res.size());
+    return;
   }
 
   Entry *data = CONTAINER_OF(node, Entry, node);
-  return data->val;
+  addTagStr(dest, reinterpret_cast<const uint8_t *>(data->val.data()),
+            data->val.size());
+  // return data->val;
 }
 
-static void doSet(const std::vector<std::string> &cmds) {
+static void doSet(const std::vector<std::string> &cmds,
+                  std::vector<uint8_t> &dest) {
   Entry dummy;
   dummy.key = cmds[1];
-  dummy.node.hcode = hash(reinterpret_cast<const uint8_t *>(dummy.key.data()), dummy.key.size());
+  dummy.node.hcode = hash(reinterpret_cast<const uint8_t *>(dummy.key.data()),
+                          dummy.key.size());
 
   HNode *node = hmapLookup(&db.store, &dummy.node);
 
@@ -36,35 +44,43 @@ static void doSet(const std::vector<std::string> &cmds) {
     newEntry->node.hcode = dummy.node.hcode;
     hmapInsert(&db.store, &newEntry->node);
   }
+
+  const std::string res = "ok";
+  addTagStr(dest, reinterpret_cast<const uint8_t *>(res.data()), res.size());
 }
 
-static void doDel(const std::vector<std::string> &cmds) {
+static void doDel(const std::vector<std::string> &cmds,
+                  std::vector<uint8_t> &dest) {
   Entry dummy;
   dummy.key = cmds[1];
-  dummy.node.hcode = hash(reinterpret_cast<const uint8_t *>(dummy.key.data()), dummy.key.size());
+  dummy.node.hcode = hash(reinterpret_cast<const uint8_t *>(dummy.key.data()),
+                          dummy.key.size());
 
   HNode *node = hmapDelete(&db.store, &dummy.node);
   if (node) {
     delete CONTAINER_OF(node, Entry, node);
   }
+  const std::string res = "ok";
+  addTagStr(dest, reinterpret_cast<const uint8_t *>(res.data()), res.size());
+}
+
+static void doKeys(std::vector<uint8_t> &dest) {
+  addTagArr(dest, hmapSize(&db.store));
+  hmapKeys(&db.store, dest);
 }
 
 void executeCommand(std::vector<std::string> &cmds, Connection *conn) {
-  std::string res;
-
   if (cmds.size() == 2 && cmds[0] == "get") {
-    res = doGet(cmds);
+    doGet(cmds, conn->outgoing);
   } else if (cmds.size() == 3 && cmds[0] == "set") {
-    doSet(cmds);
-    res = "ok";
+    doSet(cmds, conn->outgoing);
   } else if (cmds.size() == 2 && cmds[0] == "del") {
-    doDel(cmds);
-    res = "ok";
+    doDel(cmds, conn->outgoing);
+  } else if (cmds.size() == 1 && cmds[0] == "keys") {
+    doKeys(conn->outgoing);
   } else {
-    res = "invalid command";
+    addTagErr(conn->outgoing, "invalid command");
   }
-
-  generateResponse(conn->outgoing, res);
 }
 
 } // namespace corekv

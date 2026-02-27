@@ -1,4 +1,5 @@
 #include "hash_table.hpp"
+#include "protocol/serializer.hpp"
 #include <cstdlib>
 
 namespace corekv {
@@ -128,6 +129,23 @@ void hmapInsert(HMap *hmap, HNode *node) {
   }
 
   hmapRehash(hmap);
+}
+
+size_t hmapSize(HMap *hmap) { return hmap->newer.size + hmap->older.size; }
+
+void hmapForEach(HTab *htab, std::vector<uint8_t> &dest) {
+  for (int i = 0; (htab->mask > 0 && i < htab->mask); i++) {
+    for (HNode *mover = htab->tab[i]; mover != nullptr; mover = mover->next) {
+      Entry *record = CONTAINER_OF(mover, Entry, node);
+      addTagStr(dest, reinterpret_cast<const uint8_t *>(record->key.data()),
+                record->key.size());
+    }
+  }
+}
+
+void hmapKeys(HMap *hmap, std::vector<uint8_t> &dest) {
+  hmapForEach(&hmap->newer, dest);
+  hmapForEach(&hmap->older, dest);
 }
 
 } // namespace corekv

@@ -1,9 +1,10 @@
 #include "parser.hpp"
-#include "serializer.hpp"
 #include "../handler/executor.hpp"
+#include "serializer.hpp"
 
 #include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <unistd.h>
 
 namespace corekv {
@@ -27,7 +28,8 @@ void handleRead(Connection *conn) {
     return;
   }
 
-  appendToBuffer(conn->incoming, reinterpret_cast<const uint8_t *>(buffer), static_cast<int>(rv));
+  appendToBuffer(conn->incoming, reinterpret_cast<const uint8_t *>(buffer),
+                 static_cast<int>(rv));
 
   while (parseMessage(conn)) {
   }
@@ -75,9 +77,16 @@ bool parseMessage(Connection *conn) {
   }
 
   std::vector<std::string> cmds;
+
   removeFromBuffer(conn->incoming, 4);
+
+  conn->outgoing.resize(4); // reserving 4 bytes for the length;
+
   parseCommands(conn->incoming, cmds, static_cast<int>(header));
   executeCommand(cmds, conn);
+
+  uint32_t len = conn->outgoing.size();
+  std::memcpy(&conn->outgoing[0], &len, 4);
 
   return true;
 }

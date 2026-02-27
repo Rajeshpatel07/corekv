@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace corekv {
 
@@ -17,6 +18,8 @@ class HNode {
 public:
   HNode *next = nullptr;
   uint64_t hcode = 0;
+
+  ~HNode() { delete next; }
 };
 
 class HTab {
@@ -24,6 +27,8 @@ public:
   HNode **tab = nullptr;
   size_t mask = 0;
   size_t size = 0;
+
+  ~HTab() { delete[] tab; }
 };
 
 struct HMap {
@@ -60,5 +65,9 @@ HNode *hmapLookup(HMap *hmap, HNode *key);
 void hmapInsert(HMap *hmap, HNode *node);
 
 void hmapRehash(HMap *hmap);
+
+size_t hmapSize(HMap *hmap);
+
+void hmapKeys(HMap *hmap, std::vector<uint8_t> &dest);
 
 } // namespace corekv
