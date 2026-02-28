@@ -1,4 +1,5 @@
 #include "server.hpp"
+#include "../core/db.hpp"
 #include "../protocol/parser.hpp"
 
 #include <cerrno>
@@ -8,16 +9,49 @@
 
 namespace corekv {
 
+Server::Server() : serverFd(-1), running(false) {
+}
+
+Server::~Server() {
+  stop();
+}
+
+void Server::stop() {
+  if (!running) {
+    return;
+  }
+  running = false;
+
+  // Close all client connections
+  for (Connection *conn : connections) {
+    if (conn) {
+      close(conn->fd);
+      delete conn;
+    }
+  }
+  connections.clear();
+
+  // Close server socket
+  if (serverFd >= 0) {
+    close(serverFd);
+    serverFd = -1;
+  }
+
+  // Free all hash table memory (fixes memory leak)
+  hmapDestroy(&db.store);
+}
+
 void Server::start(int port) {
   serverFd = createServerSocket(port);
   if (serverFd < 0) {
     std::exit(1);
   }
+  running = true;
   eventLoop();
 }
 
 void Server::eventLoop() {
-  while (true) {
+  while (running) {
     pollArgs.clear();
 
     pollfd serverPfd = {serverFd, POLLIN, 0};
@@ -43,7 +77,8 @@ void Server::eventLoop() {
         continue;
       }
       perror("poll");
-      std::exit(1);
+      running = false;
+      break;
     }
 
     if (pollArgs[0].revents & POLLIN) {

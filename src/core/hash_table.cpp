@@ -1,6 +1,7 @@
 #include "hash_table.hpp"
 #include "protocol/serializer.hpp"
 #include <cstdlib>
+#include <iostream>
 
 namespace corekv {
 
@@ -134,7 +135,9 @@ void hmapInsert(HMap *hmap, HNode *node) {
 size_t hmapSize(HMap *hmap) { return hmap->newer.size + hmap->older.size; }
 
 void hmapForEach(HTab *htab, std::vector<uint8_t> &dest) {
-  for (int i = 0; (htab->mask > 0 && i < htab->mask); i++) {
+  // Iterate through ALL buckets (0 to mask inclusive)
+  // Note: mask = size - 1, so if size=4, mask=3, buckets are 0,1,2,3
+  for (size_t i = 0; htab->tab != nullptr && i <= htab->mask; ++i) {
     for (HNode *mover = htab->tab[i]; mover != nullptr; mover = mover->next) {
       Entry *record = CONTAINER_OF(mover, Entry, node);
       addTagStr(dest, reinterpret_cast<const uint8_t *>(record->key.data()),
@@ -146,6 +149,41 @@ void hmapForEach(HTab *htab, std::vector<uint8_t> &dest) {
 void hmapKeys(HMap *hmap, std::vector<uint8_t> &dest) {
   hmapForEach(&hmap->newer, dest);
   hmapForEach(&hmap->older, dest);
+}
+
+// Free all entries in a single hash table (does not free the table itself)
+static void hTabDestroy(HTab *htab) {
+  if (!htab || !htab->tab) {
+    return;
+  }
+  // Iterate through all buckets and free each Entry
+  for (size_t i = 0; i <= htab->mask; ++i) {
+    HNode *node = htab->tab[i];
+    while (node) {
+      HNode *next = node->next;
+      // Free the Entry containing this HNode
+      Entry *entry = CONTAINER_OF(node, Entry, node);
+      delete entry;
+      node = next;
+    }
+  }
+  // Free the bucket array itself
+  std::free(htab->tab);
+  htab->tab = nullptr;
+  htab->mask = 0;
+  htab->size = 0;
+}
+
+// Destroy entire hash map and free all allocated memory
+// This should be called when shutting down the server
+void hmapDestroy(HMap *hmap) {
+  if (!hmap) {
+    return;
+  }
+  // Free both newer and older tables along with all entries
+  hTabDestroy(&hmap->newer);
+  hTabDestroy(&hmap->older);
+  hmap->migrate_pos = 0;
 }
 
 } // namespace corekv

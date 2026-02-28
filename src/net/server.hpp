@@ -10,9 +10,13 @@ class Server {
   int serverFd = -1;
   std::vector<Connection *> connections;
   std::vector<pollfd> pollArgs;
+  bool running = false;
 
 public:
+  Server();
+  ~Server();
   void start(int port);
+  void stop();
 
 private:
   void eventLoop();

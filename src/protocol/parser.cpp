@@ -5,6 +5,8 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <iostream>
+#include <netinet/in.h>
 #include <unistd.h>
 
 namespace corekv {
@@ -85,7 +87,7 @@ bool parseMessage(Connection *conn) {
   parseCommands(conn->incoming, cmds, static_cast<int>(header));
   executeCommand(cmds, conn);
 
-  uint32_t len = conn->outgoing.size();
+  uint32_t len = htonl(conn->outgoing.size() - 4);
   std::memcpy(&conn->outgoing[0], &len, 4);
 
   return true;

@@ -2,6 +2,7 @@
 #include "../core/db.hpp"
 #include "../core/hash_table.hpp"
 #include "../protocol/serializer.hpp"
+#include <iostream>
 
 namespace corekv {
 
@@ -45,8 +46,7 @@ static void doSet(const std::vector<std::string> &cmds,
     hmapInsert(&db.store, &newEntry->node);
   }
 
-  const std::string res = "ok";
-  addTagStr(dest, reinterpret_cast<const uint8_t *>(res.data()), res.size());
+  addTagNil(dest);
 }
 
 static void doDel(const std::vector<std::string> &cmds,
@@ -60,8 +60,8 @@ static void doDel(const std::vector<std::string> &cmds,
   if (node) {
     delete CONTAINER_OF(node, Entry, node);
   }
-  const std::string res = "ok";
-  addTagStr(dest, reinterpret_cast<const uint8_t *>(res.data()), res.size());
+
+  addTagNil(dest);
 }
 
 static void doKeys(std::vector<uint8_t> &dest) {

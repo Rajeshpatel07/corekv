@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <endian.h> // For htobe64 (big-endian conversion for 64-bit values)
 #include <netinet/in.h>
 
 namespace corekv {
@@ -92,29 +93,35 @@ void addTagErr(std::vector<uint8_t> &dest, const std::string msg) {
 void addTagInt(std::vector<uint8_t> &dest, int val) {
   uint8_t tag = TAG_INT;
   appendToBuffer(dest, &tag, sizeof(tag));
-  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&val), 4);
+  // Convert to network byte order (big-endian) for cross-platform compatibility
+  uint32_t val_be = htonl(static_cast<uint32_t>(val));
+  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&val_be), 4);
 }
 
 void addTagLong(std::vector<uint8_t> &dest, long val) {
   uint8_t tag = TAG_LONG;
   appendToBuffer(dest, &tag, sizeof(tag));
-  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&val), 8);
+  // Convert 64-bit value to big-endian for network byte order
+  uint64_t val_be = htobe64(static_cast<uint64_t>(val));
+  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&val_be), 8);
 }
 
 void addTagDbl(std::vector<uint8_t> &dest, double val) {
   uint8_t tag = TAG_DBL;
   appendToBuffer(dest, &tag, sizeof(tag));
-  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&val), 8);
+  // Convert double to big-endian byte order for network transmission
+  uint64_t val_be = htobe64(static_cast<uint64_t>(val));
+  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&val_be), 8);
 }
 
 void addTagArr(std::vector<uint8_t> &dest, uint32_t len) {
   uint8_t tag = TAG_ARR;
   appendToBuffer(dest, &tag, sizeof(tag));
 
+  // Store the array element count in network byte order
+  // Note: This is the count of elements, not total bytes
   uint32_t len_be = htonl(len);
   appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&len_be), 4);
-  // Remove this line - it's wrong (raw len instead of empty array data):
-  // appendToBuffer(dest, reinterpret_cast<const uint8_t*>(&len), 4);
 }
 
 } // namespace corekv
