@@ -3,33 +3,29 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
-#include <netinet/in.h>
 #include <string>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <vector>
-
-enum {
-  TAG_NIL = 0,  // nil (no value follows)
-  TAG_ERR = 1,  // error: [4-byte len][error message]
-  TAG_STR = 2,  // string: [4-byte len][value]
-  TAG_INT = 3,  // int32: [4-byte value in big-endian]
-  TAG_LONG = 4, // int64: [8-byte value in big-endian]
-  TAG_DBL = 5,  // double: [8-byte value in big-endian]
-  TAG_ARR = 6,  // array: [4-byte count][element1][element2]...
+enum class Tag : uint8_t {
+  NIL = 0,  // nil (no value follows)
+  ERR = 1,  // error: [4-byte len][error message]
+  STR = 2,  // string: [4-byte len][value]
+  INT = 3,  // int32: [4-byte value in big-endian]
+  LONG = 4, // int64: [8-byte value in big-endian]
+  DBL = 5,  // double: [8-byte value in big-endian]
+  ARR = 6,  // array: [4-byte count][element1][element2]...
 };
 
-// Trim whitespace from string
+namespace StringUtils {
 std::string trim(const std::string &str) {
   size_t first = str.find_first_not_of(' ');
-  if (first == std::string::npos) {
-    return str;
-  }
+  if (first == std::string::npos)
+    return "";
   size_t last = str.find_last_not_of(' ');
   return str.substr(first, last - first + 1);
 }
 
-// Split string by spaces
 std::vector<std::string> split(const std::string &src) {
   std::vector<std::string> tokens;
   std::string temp;
@@ -43,21 +39,20 @@ std::vector<std::string> split(const std::string &src) {
       temp += c;
     }
   }
-  if (!temp.empty()) {
+  if (!temp.empty())
     tokens.push_back(temp);
-  }
   return tokens;
 }
+} // namespace StringUtils
 
-// Read exactly n bytes from fd (handles partial reads)
-static bool read_all(int fd, void *buf, size_t n) {
+namespace IO {
+bool read_exact(int fd, void *buf, size_t n) {
   char *ptr = static_cast<char *>(buf);
   while (n > 0) {
     ssize_t rv = read(fd, ptr, n);
     if (rv <= 0) {
-      if (rv < 0) {
+      if (rv < 0)
         perror("read");
-      }
       return false;
     }
     ptr += rv;
@@ -66,8 +61,7 @@ static bool read_all(int fd, void *buf, size_t n) {
   return true;
 }
 
-// Write exactly n bytes to fd (handles partial writes)
-static bool write_all(int fd, const void *buf, size_t n) {
+bool write_exact(int fd, const void *buf, size_t n) {
   const char *ptr = static_cast<const char *>(buf);
   while (n > 0) {
     ssize_t wt = write(fd, ptr, n);
@@ -81,274 +75,226 @@ static bool write_all(int fd, const void *buf, size_t n) {
   return true;
 }
 
-// Read a NIL response (no data follows tag)
-void readNil() { std::cout << "(nil)" << std::endl; }
-
-// Read an ERR response: [4-byte len][message]
-void readErr(int fd, uint32_t len) {
-  std::string msg;
-  msg.resize(len);
-  if (!read_all(fd, &msg[0], len)) {
-    std::cerr << "Failed to read error message" << std::endl;
-    return;
-  }
-  std::cerr << "ERR: " << msg << std::endl;
+// --- Read Primitives ---
+bool read_u8(int fd, uint8_t &val) { return read_exact(fd, &val, 1); }
+bool read_u32(int fd, uint32_t &val) {
+  if (!read_exact(fd, &val, 4))
+    return false;
+  val = ntohl(val);
+  return true;
 }
-
-// Read a STR response: [4-byte len][value]
-void readStr(int fd, uint32_t len) {
-  std::string val;
-  val.resize(len);
-  if (!read_all(fd, &val[0], len)) {
-    std::cerr << "Failed to read string value" << std::endl;
-    return;
-  }
-  std::cout << "\"" << val << "\"" << std::endl;
-}
-
-// Read an INT response: [4-byte value in big-endian]
-void readInt(int fd) {
-  int32_t val;
-  if (!read_all(fd, &val, sizeof(val))) {
-    std::cerr << "Failed to read int value" << std::endl;
-    return;
-  }
-  val = static_cast<int32_t>(ntohl(static_cast<uint32_t>(val)));
-  std::cout << val << std::endl;
-}
-
-// Read a LONG response: [8-byte value in big-endian]
-void readLong(int fd) {
-  int64_t val;
-  if (!read_all(fd, &val, sizeof(val))) {
-    std::cerr << "Failed to read long value" << std::endl;
-    return;
-  }
+bool read_u64(int fd, uint64_t &val) {
+  if (!read_exact(fd, &val, 8))
+    return false;
   val = be64toh(val);
-  std::cout << val << std::endl;
-}
-
-// Read a DBL response: [8-byte value in big-endian]
-void readDbl(int fd) {
-  uint64_t bits;
-  if (!read_all(fd, &bits, sizeof(bits))) {
-    std::cerr << "Failed to read double value" << std::endl;
-    return;
-  }
-  bits = be64toh(bits);
-  double val;
-  memcpy(&val, &bits, sizeof(val));
-  std::cout << val << std::endl;
-}
-
-// Forward declarations for recursive array parsing
-void readArray(int fd);
-void readArrayElement(int fd);
-
-// Recursively read array elements
-void readArrayElement(int fd) {
-  uint8_t tag;
-  if (!read_all(fd, &tag, 1)) {
-    return;
-  }
-
-  switch (tag) {
-  case TAG_NIL:
-    std::cout << "(nil)";
-    break;
-  case TAG_ERR: {
-    uint32_t len;
-    read_all(fd, &len, 4);
-    len = ntohl(len);
-    readErr(fd, len);
-    break;
-  }
-  case TAG_STR: {
-    uint32_t len;
-    read_all(fd, &len, 4);
-    len = ntohl(len);
-    readStr(fd, len);
-    break;
-  }
-  case TAG_INT:
-    readInt(fd);
-    std::cout << "(int)";
-    break;
-  case TAG_LONG:
-    readLong(fd);
-    std::cout << "(long)";
-    break;
-  case TAG_DBL:
-    readDbl(fd);
-    std::cout << "(dbl)";
-    break;
-  case TAG_ARR:
-    std::cout << "[";
-    readArray(fd);
-    std::cout << "]";
-    break;
-  default:
-    std::cerr << "Unknown tag: " << static_cast<int>(tag) << std::endl;
-  }
-}
-
-// Read an ARR response: [4-byte count][element1][element2]...
-void readArray(int fd) {
-  uint32_t count;
-  if (!read_all(fd, &count, 4)) {
-    std::cerr << "Failed to read array count" << std::endl;
-    return;
-  }
-  count = ntohl(count);
-
-  for (uint32_t i = 0; i < count; ++i) {
-    readArrayElement(fd);
-  }
-}
-
-// Main response handler: reads [LEN][TAG][VALUE] format
-bool handle_read(int fd) {
-  // Step 1: Read 4-byte length (bytes from TAG to end of VALUE)
-  uint32_t total_len;
-  if (!read_all(fd, &total_len, 4)) {
-    return false;
-  }
-  total_len = ntohl(total_len);
-
-  // Step 2: Read 1-byte tag
-  uint8_t tag;
-  if (!read_all(fd, &tag, 1)) {
-    return false;
-  }
-
-  // Step 3: Parse value based on tag
-  switch (tag) {
-  case TAG_NIL:
-    readNil();
-    break;
-  case TAG_ERR:
-    readErr(fd, total_len - 1);
-    break;
-  case TAG_STR:
-    readStr(fd, total_len - 1);
-    break;
-  case TAG_INT:
-    if (total_len != 5) {
-      std::cerr << "Invalid INT length: " << total_len << std::endl;
-      return false;
-    }
-    readInt(fd);
-    break;
-  case TAG_LONG:
-    if (total_len != 9) {
-      std::cerr << "Invalid LONG length: " << total_len << std::endl;
-      return false;
-    }
-    readLong(fd);
-    break;
-  case TAG_DBL:
-    if (total_len != 9) {
-      std::cerr << "Invalid DBL length: " << total_len << std::endl;
-      return false;
-    }
-    readDbl(fd);
-    break;
-  case TAG_ARR:
-    readArray(fd);
-    break;
-  default:
-    std::cerr << "Unknown tag: " << static_cast<int>(tag) << std::endl;
-    return false;
-  }
-
   return true;
 }
 
-// Send request in LV format: [LEN][LEN][VAL][LEN][VAL]...
-bool handle_write(int fd, const std::string &msg) {
-  std::vector<std::string> cmd = split(msg);
+void append_u32(std::string &buffer, uint32_t val) {
+  uint32_t net_val = htonl(val);
+  buffer.append(reinterpret_cast<const char *>(&net_val), 4);
+}
+} // namespace IO
 
-  // Calculate total payload size
-  uint32_t payload_size = 0;
-  for (const std::string &s : cmd) {
-    payload_size +=
-        4 + static_cast<uint32_t>(s.size()); // 4-byte length + value
+class KvClient {
+private:
+  int fd_;
+
+public:
+  KvClient() : fd_(-1) {}
+
+  ~KvClient() {
+    if (fd_ >= 0)
+      close(fd_);
   }
 
-  // Build message: [LEN][LEN][VAL][LEN][VAL]...
-  std::string payload;
-  payload.reserve(4 + payload_size);
+  bool connect_to_server(const std::string &ip, int port) {
+    fd_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd_ < 0) {
+      perror("socket");
+      return false;
+    }
 
-  // Add total length prefix
-  uint32_t net_payload_size = htonl(payload_size);
-  payload.append(reinterpret_cast<const char *>(&net_payload_size), 4);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    inet_pton(AF_INET, ip.c_str(), &address.sin_addr);
 
-  // Add each command part
-  for (const std::string &s : cmd) {
-    uint32_t word_len = htonl(static_cast<uint32_t>(s.size()));
-    payload.append(reinterpret_cast<const char *>(&word_len), 4);
-    payload.append(s);
+    if (connect(fd_, reinterpret_cast<sockaddr *>(&address), sizeof(address)) <
+        0) {
+      perror("connect");
+      return false;
+    }
+    return true;
   }
 
-  return write_all(fd, payload.data(), payload.size());
+  // Formats and sends: [Total_Len][Len][Word][Len][Word]...
+  bool send_command(const std::string &input) {
+    std::vector<std::string> cmd = StringUtils::split(input);
+    if (cmd.empty())
+      return true;
+
+    uint32_t payload_size = 0;
+    for (const auto &s : cmd) {
+      payload_size += 4 + s.size();
+    }
+
+    std::string payload;
+    payload.reserve(4 + payload_size);
+
+    IO::append_u32(payload, payload_size);
+    for (const auto &s : cmd) {
+      IO::append_u32(payload, s.size());
+      payload.append(s);
+    }
+
+    return IO::write_exact(fd_, payload.data(), payload.size());
+  }
+
+  // Reads top-level response: [Total_Len][Tag][Value]
+  bool receive_response() {
+    uint32_t total_len;
+    if (!IO::read_u32(fd_, total_len))
+      return false;
+
+    parse_element(total_len);
+    std::cout << "\n";
+    return true;
+  }
+
+private:
+  // Recursively handles reading based on the Tag Type
+  void parse_element(uint32_t &total_len) {
+    if (total_len < 1) {
+      return;
+    }
+
+    uint8_t raw_tag;
+    if (!IO::read_u8(fd_, raw_tag))
+      return;
+    total_len -= 1;
+
+    Tag tag = static_cast<Tag>(raw_tag);
+    switch (tag) {
+    case Tag::NIL: {
+      std::cout << "(nil)";
+      break;
+    }
+    case Tag::ERR: {
+      uint32_t len;
+      if (IO::read_u32(fd_, len)) {
+        std::string msg(len, '\0');
+        IO::read_exact(fd_, &msg[0], len);
+        total_len -= 4 + len;
+        std::cerr << "(error) " << msg;
+      }
+      break;
+    }
+    case Tag::STR: {
+      uint32_t len;
+      if (IO::read_u32(fd_, len)) {
+        std::string val(len, '\0');
+        IO::read_exact(fd_, &val[0], len);
+        total_len -= 4 + len;
+        std::cout << "\"" << val << "\"";
+      }
+      break;
+    }
+    case Tag::INT: {
+      uint32_t val;
+      if (IO::read_u32(fd_, val)) {
+        std::cout << static_cast<int32_t>(val);
+        total_len -= 4;
+      }
+      break;
+    }
+    case Tag::LONG: {
+      uint64_t val;
+      if (IO::read_u64(fd_, val)) {
+        total_len -= 8;
+        std::cout << static_cast<int64_t>(val);
+      }
+      break;
+    }
+    case Tag::DBL: {
+      uint64_t bits;
+      if (IO::read_u64(fd_, bits)) {
+        double val;
+        std::memcpy(&val, &bits, sizeof(val));
+        total_len -= 8;
+        std::cout << val;
+      }
+      break;
+    }
+    case Tag::ARR: {
+      uint32_t count;
+      if (IO::read_u32(fd_, count)) {
+        std::cout << "[";
+        for (uint32_t i = 0; i < count; ++i) {
+          parse_element(total_len);
+          if (i < count - 1)
+            std::cout << ", ";
+        }
+        std::cout << "]";
+      }
+      break;
+    }
+    default: {
+      std::cerr << "[Unknown Tag: " << static_cast<int>(raw_tag) << "]";
+      break;
+    }
+    }
+
+    return;
+  }
+};
+
+void print_help() {
+  std::cout << "Available Commands:\n"
+            << "  get [key]          get value by key\n"
+            << "  set [key] [value]  set key-value pair\n"
+            << "  del [key]          delete key\n"
+            << "  keys               list all keys\n"
+            << "  help               show this help\n"
+            << "  exit               quit\n";
 }
 
 int main() {
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) {
-    perror("socket");
+  KvClient client;
+
+  if (!client.connect_to_server("127.0.0.1", 8000)) {
+    std::cerr << "Failed to connect to server." << std::endl;
     return 1;
   }
 
-  sockaddr_in address{};
-  address.sin_family = AF_INET;
-  address.sin_port = htons(8000);
-  inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
-
-  if (connect(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) <
-      0) {
-    perror("connect");
-    close(fd);
-    return 1;
-  }
-
-  std::cout << "Commands: get, set, del, keys, exit, help" << std::endl;
+  std::cout << "Connected to KV Store! Type 'help' for commands.\n";
 
   while (true) {
     std::cout << "> ";
     std::string input;
-    std::getline(std::cin, input);
-    input = trim(input);
 
-    if (input.empty()) {
+    if (!std::getline(std::cin, input))
+      break;
+
+    input = StringUtils::trim(input);
+    if (input.empty())
       continue;
-    }
 
     if (input == "help") {
-      std::cout << "get [key]          get value by key\n";
-      std::cout << "set [key] [value]  set key-value pair\n";
-      std::cout << "del [key]          delete key\n";
-      std::cout << "keys               list all keys\n";
-      std::cout << "exit               quit\n";
-      std::cout << "help               show this help\n";
+      print_help();
       continue;
     }
-
     if (input == "exit") {
       break;
     }
 
-    if (!handle_write(fd, input)) {
-      std::cerr << "Error while writing" << std::endl;
+    if (!client.send_command(input)) {
+      std::cerr << "Connection lost while writing." << std::endl;
       break;
     }
-
-    if (!handle_read(fd)) {
-      std::cerr << "Error while reading" << std::endl;
-      break;
+    if (!client.receive_response()) {
+      std::cerr << "Connection lost while reading." << std::endl;
     }
   }
-
-  close(fd);
   return 0;
 }

@@ -19,6 +19,12 @@ void removeFromBuffer(std::vector<uint8_t> &src, int size) {
   }
 }
 
+void reservePrefixHeader(std::vector<uint8_t> &dest, uint32_t &headerIdx) {
+  headerIdx = dest.size();
+  uint32_t header = 0;
+  appendToBuffer(dest, reinterpret_cast<const uint8_t *>(&header), 4);
+}
+
 void readUint32(std::vector<uint8_t> &src, uint32_t &dest) {
   if (src.size() < 4) {
     dest = 0;
@@ -38,15 +44,11 @@ void readMessage(std::vector<uint8_t> &src, std::string &msg, uint32_t size) {
 void parseCommands(std::vector<uint8_t> &src, std::vector<std::string> &cmds,
                    int totalSize) {
   int processed = 0;
-  while (processed < totalSize && src.size() >= 4) {
+  while (processed < totalSize) {
     uint32_t cmdSize;
     readUint32(src, cmdSize);
     removeFromBuffer(src, 4);
     processed += 4;
-
-    if (cmdSize > src.size()) {
-      break;
-    }
 
     std::string cmd;
     readMessage(src, cmd, cmdSize);

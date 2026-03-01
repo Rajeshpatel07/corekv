@@ -20,6 +20,8 @@ void appendToBuffer(std::vector<uint8_t> &dest, const uint8_t *data, int size);
 
 void removeFromBuffer(std::vector<uint8_t> &src, int size);
 
+void reservePrefixHeader(std::vector<uint8_t> &dest, uint32_t &headerIdx);
+
 void readUint32(std::vector<uint8_t> &src, uint32_t &dest);
 
 void readMessage(std::vector<uint8_t> &src, std::string &msg, uint32_t size);

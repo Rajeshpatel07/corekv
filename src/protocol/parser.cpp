@@ -5,7 +5,6 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
-#include <iostream>
 #include <netinet/in.h>
 #include <unistd.h>
 
@@ -82,13 +81,15 @@ bool parseMessage(Connection *conn) {
 
   removeFromBuffer(conn->incoming, 4);
 
-  conn->outgoing.resize(4); // reserving 4 bytes for the length;
+  // Reserver 4 bytes for prefix header length
+  uint32_t header_pos = 0;
+  reservePrefixHeader(conn->outgoing, header_pos);
 
   parseCommands(conn->incoming, cmds, static_cast<int>(header));
   executeCommand(cmds, conn);
 
   uint32_t len = htonl(conn->outgoing.size() - 4);
-  std::memcpy(&conn->outgoing[0], &len, 4);
+  std::memcpy(&conn->outgoing[header_pos], &len, 4);
 
   return true;
 }
