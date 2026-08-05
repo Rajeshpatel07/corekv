@@ -25,6 +25,15 @@ target_link_libraries(corekv-server PRIVATE corekv_core)
 
 add_executable(corekv-client src/client.cpp)
 
+option(COREKV_BUILD_BENCH "Build the corekv-bench load generator" ON)
+
+if(COREKV_BUILD_BENCH)
+    find_package(Threads REQUIRED)
+    add_executable(corekv-bench bench/corekv_bench.cpp)
+    target_compile_options(corekv-bench PRIVATE -O3)
+    target_link_libraries(corekv-bench PRIVATE Threads::Threads)
+endif()
+
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     target_compile_options(corekv_core PRIVATE -O3 -march=native -flto)
     target_link_options(corekv_core PRIVATE -flto)

@@ -3,6 +3,10 @@ build/
 bin/
 *.cache
 
+# Stress-test artifacts
+results/
+infra/prometheus/prometheus.yml
+
 # Prerequisites
 *.d
 

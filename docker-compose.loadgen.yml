@@ -1,0 +1,21 @@
+# CoreKV load-generator stack (run on the LOAD GENERATOR instance).
+#
+# Only exports system metrics. The load generator itself (corekv-bench)
+# is launched on demand via `docker run` from run-stress-test.sh so that
+# each scenario starts with a clean process and a fresh histogram.
+
+services:
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: corekv-loadgen-node-exporter
+    network_mode: host
+    pid: host
+    restart: unless-stopped
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave

@@ -1,0 +1,69 @@
+# CoreKV stress-test stack (run on the SERVER instance).
+#
+# Usage (from the repo root):
+#   export SERVER_PRIVATE_IP=10.0.0.10
+#   export LOADGEN_PRIVATE_IP=10.0.0.11
+#   docker compose -f docker-compose.server.yml up -d --build
+#
+# The load generator is NOT part of this stack; it runs on a separate
+# instance to avoid stealing CPU from the server.
+
+services:
+  corekv:
+    build:
+      context: .
+      dockerfile: infra/docker/server.Dockerfile
+    container_name: corekv-server
+    network_mode: host
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000 && exec 3>&-' || exit 1"]
+      interval: 5s
+      timeout: 2s
+      start_period: 5s
+      retries: 3
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: corekv-node-exporter
+    network_mode: host
+    pid: host
+    restart: unless-stopped
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-ubuntu/prometheus:latest}
+    container_name: corekv-prometheus
+    network_mode: host
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+    volumes:
+      - ./infra/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: corekv-grafana
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-corekv-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+volumes:
+  prometheus-data:
+  grafana-data:
