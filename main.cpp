@@ -1,6 +1,12 @@
+#include "core/network.h"
+#include <exception>
 #include <iostream>
+#include <vector>
 
 int main(int argc, char **argv) {
-  std::cout << "Hello from corekv\n";
-  return 0;
+  try {
+    Corekv::Server server(8000);
+  } catch (std::exception &e) {
+    std::cerr << e.what() << "\n";
+  }
 }
