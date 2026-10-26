@@ -1,11 +1,16 @@
 #include "core/network.h"
+#include "parser.h"
 #include <arpa/inet.h>
+#include <cerrno>
 #include <cstring>
+#include <fcntl.h>
 #include <iostream>
 #include <netinet/in.h>
+#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <system_error>
 #include <unistd.h>
+#include <vector>
 
 namespace Corekv {
 
@@ -13,12 +18,13 @@ Server::Server(int port) : server_port_(port) {
   create_socket();
   set_socket_options();
   bind_and_listen();
-  start_server();
+  run_epoll();
 }
 
 Server::~Server() {
   if (server_fd_ >= 0) {
     close(server_fd_);
+    close(epoll_fd_);
   }
 }
 
@@ -78,45 +84,100 @@ void Server::bind_and_listen() {
     throw std::system_error(errno, std::generic_category(),
                             "Failed to listen on socket");
   }
+
+  set_socket_nonblock(server_fd_);
 }
 
-[[nodiscard]] int Server::accept_client() {
+void Server::set_socket_nonblock(int fd) {
+  int flags{fcntl(fd, F_GETFL, 0)};
+  if (flags < 0) {
+    throw std::system_error(errno, std::system_category(),
+                            "Failed to get socket flags");
+  }
+  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+    throw std::system_error(errno, std::system_category(),
+                            "Failed to set socket to non-blocking");
+  }
+}
+
+void Server::accept_client() {
   sockaddr_in client_addr{};
   socklen_t addr_len = sizeof(client_addr);
-  int r_val =
+  int client_fd =
       accept(server_fd_, reinterpret_cast<sockaddr *>(&client_addr), &addr_len);
 
-  if (r_val < 0) {
+  if (client_fd < 0) {
     throw std::system_error(errno, std::generic_category(),
                             "Failed to accept client connection");
   }
 
-  char ip[INET_ADDRSTRLEN];
-  inet_ntop(AF_INET, &client_addr.sin_addr, ip, sizeof(ip));
-  std::cout << "New client: " << ip << ":" << ntohs(client_addr.sin_port)
-            << std::endl;
+  set_socket_nonblock(client_fd);
 
-  return r_val;
+  epoll_event ev{};
+  ev.events = EPOLLIN;
+  ev.data.fd = client_fd; // Store fd safely (do NOT mix with ev.data.ptr unless
+                          // fd is inside Conn)
+
+  if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, client_fd, &ev) < 0) {
+    throw std::system_error(errno, std::generic_category(),
+                            "Failed to add fd to epoll watchlist");
+  }
 }
 
-void Server::start_server() {
+void Server::run_epoll() {
+  if ((epoll_fd_ = epoll_create1(0)) < 0) {
+    throw std::system_error(errno, std::generic_category(),
+                            "Failed to create epoll instance");
+  }
+
+  epoll_event ev{};
+  ev.events = EPOLLIN;
+  ev.data.fd = server_fd_;
+
+  if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, server_fd_, &ev) < 0) {
+    throw std::system_error(errno, std::generic_category(),
+                            "Failed to add fd to epoll watchlist");
+  }
+
+  std::vector<epoll_event> fd_events(MAX_EVENTS);
+
+  std::cout << "Epoll Server started at port " << server_port_ << "\n";
   while (true) {
-    int client_fd{accept_client()};
-
-    char buffer[1024];
-    int read_val = read(client_fd, buffer, sizeof(buffer));
-    if (read_val <= 0) {
-      std::cerr << "Error reading data from client\n";
-    }
-    std::cout << "client: " << buffer << "\n";
-
-    std::string response = "Hello from Server!";
-    int write_val = write(client_fd, response.data(), response.size());
-    if (write_val < 0) {
-      std::cerr << "Error writing data to client\n";
+    int ndfs = epoll_wait(epoll_fd_, fd_events.data(), MAX_EVENTS, -1);
+    if (ndfs < 0) {
+      if (errno == EINTR)
+        continue; // Retry if interrupted by signal
+      throw std::system_error(errno, std::generic_category(),
+                              "Failed in epoll_wait");
     }
 
-    close(client_fd);
+    for (int i = 0; i < ndfs; i++) {
+      int curr_fd = fd_events[i].data.fd;
+      uint32_t curr_event = fd_events[i].events;
+
+      // Handle errors or hangups first
+      if (curr_event & (EPOLLERR | EPOLLHUP)) {
+        epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, curr_fd, nullptr);
+        close(curr_fd);
+        continue;
+      }
+
+      if (curr_fd == server_fd_) {
+        accept_client();
+      } else {
+        if (curr_event & EPOLLIN) {
+          if (!read_from_client(epoll_fd_, fd_events[i])) {
+            epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, curr_fd, nullptr);
+            close(curr_fd);
+          }
+        } else if (curr_event & EPOLLOUT) {
+          if (!write_to_client(epoll_fd_, fd_events[i])) {
+            epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, curr_fd, nullptr);
+            close(curr_fd);
+          }
+        }
+      }
+    }
   }
 }
 

@@ -1,6 +1,15 @@
 #pragma once
 
+#include <cstdint>
+#include <vector>
 namespace Corekv {
+
+constexpr int MAX_EVENTS = 64;
+
+struct Conn {
+  std::vector<uint8_t> read_buffer;
+  std::vector<uint8_t> write_buffer;
+};
 
 /*
  * Represents a TCP network server for the CoreKV
@@ -13,13 +22,16 @@ namespace Corekv {
 class Server {
 private:
   int server_fd_{-1};
+  int epoll_fd_{-1};
   int server_port_{8080};
 
   void create_socket();
   void set_socket_options();
+  void set_socket_nonblock(int fd);
   void bind_and_listen();
-  [[nodiscard]] int accept_client();
-  void start_server();
+  void accept_client();
+
+  void run_epoll();
 
 public:
   Server() = default;
