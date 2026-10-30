@@ -1,6 +1,6 @@
 #include "db/hashtable.h"
 
-namespace Corekv {
+namespace corekv::db {
 
 HashTable::HashTable(HashTable &&other) noexcept
     : buckets(std::move(other.buckets)), size_(other.size_) {
@@ -187,4 +187,4 @@ HashNode *HashMap::remove(HashNode *node) {
   return nullptr;
 }
 
-} // namespace Corekv
+} // namespace corekv::db

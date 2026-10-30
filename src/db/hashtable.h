@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace Corekv {
+namespace corekv::db {
 
 #define CONTAINER_OF(ptr, T, member)                                           \
   ((T *)((char *)(ptr) - offsetof(T, member)))

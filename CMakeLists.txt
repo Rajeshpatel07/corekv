@@ -12,6 +12,6 @@ target_include_directories(corekv_header INTERFACE src)
 add_library(corekv_source STATIC src/core/network.cpp src/parser/parser.cpp)
 target_link_libraries(corekv_source PRIVATE corekv_header)
 
-add_executable(corekv main.cpp)
+add_executable(corekv src/main.cpp)
 
 target_link_libraries(corekv PRIVATE corekv_header corekv_source)
