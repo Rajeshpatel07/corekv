@@ -1,9 +1,20 @@
 #pragma once
 
-#include <sys/epoll.h>
+#include <cstdint>
+
+namespace corekv::net {
+struct ClientObject;
+}
+
 namespace corekv::parser {
 
-bool read_from_client(int epoll_fd, epoll_event &ev);
-bool write_to_client(int epoll_fd, epoll_event &ev);
+enum class IoResult : std::uint8_t {
+  ok,
+  would_block,
+  closed,
+};
 
-} // namespace Corekv
+[[nodiscard]] IoResult read_from_client(net::ClientObject &client);
+[[nodiscard]] IoResult write_to_client(net::ClientObject &client);
+
+} // namespace corekv::parser

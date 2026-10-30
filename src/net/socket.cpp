@@ -1,24 +1,23 @@
-#include "socket.h"
-#include "net/epoll.h"
+#include "net/socket.h"
+
 #include <cerrno>
 #include <fcntl.h>
 #include <netinet/in.h>
-#include <sys/epoll.h>
 #include <sys/socket.h>
 #include <system_error>
 #include <unistd.h>
+#include <utility>
 
 namespace corekv::net {
 
-Socket::Socket(int fd) : fd_(fd) {}
+Socket::Socket(int fd) noexcept : fd_(fd) {}
 
-Socket::Socket(Socket &&other) noexcept : fd_(other.fd_) { other.fd_ = -1; }
+Socket::Socket(Socket &&other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
 
 Socket &Socket::operator=(Socket &&other) noexcept {
   if (this != &other) {
     close();
-    fd_ = other.fd_;
-    other.fd_ = -1;
+    fd_ = std::exchange(other.fd_, -1);
   }
   return *this;
 }
@@ -27,103 +26,96 @@ Socket::~Socket() { close(); }
 
 int Socket::fd() const noexcept { return fd_; }
 
-void Socket::set_socket_nonblocking() {
-  int flags = fcntl(fd(), F_GETFL, 0);
-  if (flags < 0) {
-    throw std::system_error(errno, std::generic_category(),
-                            "Failed to get fd flags");
-  }
-
-  if (fcntl(fd(), F_SETFL, flags | O_NONBLOCK) < 0) {
-    throw std::system_error(errno, std::generic_category(),
-                            "Failed to set fd to non_block");
-  }
-}
-
-void Socket::close() {
+void Socket::close() noexcept {
   if (fd_ >= 0) {
     ::close(fd_);
     fd_ = -1;
   }
 }
 
-TcpListener::TcpListener(TcpListener &&other) noexcept
-    : socket_(std::move(other.socket_)) {}
-
-TcpListener &TcpListener::operator=(TcpListener &&other) noexcept {
-  if (this != &other) {
-    socket_ = std::move(other.socket_);
+void Socket::set_nonblocking() const {
+  const int flags = ::fcntl(fd_, F_GETFL, 0);
+  if (flags < 0) {
+    throw std::system_error(errno, std::generic_category(),
+                            "Failed to get fd flags");
   }
-  return *this;
+
+  if (::fcntl(fd_, F_SETFL, flags | O_NONBLOCK) < 0) {
+    throw std::system_error(errno, std::generic_category(),
+                            "Failed to make fd non-blocking");
+  }
 }
+
+TcpListener::TcpListener() { open(); }
 
 int TcpListener::fd() const noexcept { return socket_.fd(); }
 
 void TcpListener::open() {
-  int raw_fd = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+  // SOCK_CLOEXEC/SOCK_NONBLOCK avoid a separate fcntl() race after creation.
+  const int raw_fd =
+      ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
   if (raw_fd < 0) {
     throw std::system_error(errno, std::generic_category(),
                             "Failed to create socket");
   }
-  socket_ = Socket(raw_fd);
+  socket_ = Socket{raw_fd};
 
-  int opt_reuseaddr = 1;
-  if (setsockopt(socket_.fd(), SOL_SOCKET, SO_REUSEADDR, &opt_reuseaddr,
-                 sizeof(opt_reuseaddr)) < 0) {
+  int reuse_address = 1;
+  if (::setsockopt(socket_.fd(), SOL_SOCKET, SO_REUSEADDR, &reuse_address,
+                   sizeof(reuse_address)) < 0) {
     throw std::system_error(errno, std::generic_category(),
                             "Failed to set SO_REUSEADDR");
   }
 
-  int opt_keepalive = 1;
-  if (setsockopt(socket_.fd(), SOL_SOCKET, SO_KEEPALIVE, &opt_keepalive,
-                 sizeof(opt_keepalive)) < 0) {
+  int keep_alive = 1;
+  if (::setsockopt(socket_.fd(), SOL_SOCKET, SO_KEEPALIVE, &keep_alive,
+                   sizeof(keep_alive)) < 0) {
     throw std::system_error(errno, std::generic_category(),
                             "Failed to set SO_KEEPALIVE");
   }
 
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(8000);
-  addr.sin_addr.s_addr = INADDR_ANY;
+  sockaddr_in address{};
+  address.sin_family = AF_INET;
+  address.sin_port = htons(kDefaultTcpPort);
+  address.sin_addr.s_addr = INADDR_ANY;
 
-  if (bind(socket_.fd(), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) <
-      0) {
+  if (::bind(socket_.fd(), reinterpret_cast<const sockaddr *>(&address),
+             static_cast<socklen_t>(sizeof(address))) < 0) {
     throw std::system_error(errno, std::generic_category(),
                             "Failed to bind socket");
   }
 
-  if (listen(socket_.fd(), SOMAXCONN) < 0) {
+  if (::listen(socket_.fd(), SOMAXCONN) < 0) {
     throw std::system_error(errno, std::generic_category(),
                             "Failed to listen on socket");
   }
 }
 
-void TcpListener::try_accept(Epoll &epoll_instance) {
+std::unique_ptr<ClientObject> TcpListener::try_accept() {
   while (true) {
-    sockaddr_in client{};
-    socklen_t len = sizeof(client);
+    sockaddr_in client_address{};
+    socklen_t length = static_cast<socklen_t>(sizeof(client_address));
 
-    int client_fd = accept4(socket_.fd(), reinterpret_cast<sockaddr *>(&client),
-                            &len, SOCK_NONBLOCK);
+    const int client_fd =
+        ::accept4(socket_.fd(), reinterpret_cast<sockaddr *>(&client_address),
+                  &length, SOCK_NONBLOCK | SOCK_CLOEXEC);
 
-    if (client_fd < 0) {
-      if (errno == EINTR)
-        continue;
-      break;
+    if (client_fd >= 0) {
+      // If make_unique throws, the temporary Socket closes client_fd.
+      return std::make_unique<ClientObject>(Socket{client_fd});
     }
 
-    auto *client_obj = new ClientObject{client_fd, {}, {}};
+    if (errno == EINTR) {
+      continue;
+    }
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      return nullptr;
+    }
 
-    epoll_event ev{};
-    ev.events = EPOLLIN;
-    ev.data.ptr = client_obj;
-
-    epoll_instance.add(ev);
+    // Any other accept error is a real failure, not a reason to stop quietly.
+    throw std::system_error(errno, std::generic_category(),
+                            "Failed to accept connection");
   }
-}
-
-void TcpListener::close(){
-  socket_.close();
 }
 
 } // namespace corekv::net

@@ -1,79 +1,99 @@
-#include "server.h"
-#include "net/socket.h"
+#include "server/server.h"
+
 #include "parser/parser.h"
-#include <sys/epoll.h>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <iostream>
+#include <tuple>
+#include <utility>
 
 namespace corekv::server {
+namespace {
 
-Server::Server() {
-  listener_.open();
-  start_eventloop();
+constexpr std::size_t kMaxEvents = 64;
+
+[[nodiscard]] epoll_event make_event(std::uint32_t events,
+                                     void *data) noexcept {
+  epoll_event event{};
+  event.events = events;
+  event.data.ptr = data;
+  return event;
 }
 
-Server::Server(Server &&other) noexcept
-    : epoll_(std::move(other.epoll_)), listener_(std::move(other.listener_)) {}
+} // namespace
 
-Server &Server::operator=(Server &&other) noexcept {
-  if (this != &other) {
-    epoll_.close();
-    listener_.close();
-    epoll_ = std::move(other.epoll_);
-    listener_ = std::move(other.listener_);
-  }
-  return *this;
-}
+void Server::run() {
+  epoll_.add(listener_.fd(), make_event(EPOLLIN, &listener_));
 
-void Server::start_eventloop() {
-  epoll_.create();
+  std::clog << "Server listening on port " << net::kDefaultTcpPort << '\n';
 
-  std::cout << "server started at port 8000\n";
-  epoll_event ev{};
-  ev.events = EPOLLIN;
-  auto *obj{new net::ClientObject};
-  obj->fd = listener_.fd();
-
-  ev.data.ptr = obj;
-
-  epoll_.add(ev);
-
-  std::vector<epoll_event> events(64);
-
+  std::array<epoll_event, kMaxEvents> events{};
   while (true) {
-    int ndfs = epoll_.wait(events);
-
-    for (int i = 0; i < ndfs; i++) {
-      auto *obj = static_cast<net::ClientObject *>(events[i].data.ptr);
-      uint32_t event = events[i].events;
-
-      if (event == EPOLLERR || event == EPOLLHUP) {
-        epoll_.remove(events[i]);
+    for (epoll_event &event : epoll_.wait(events)) {
+      if (event.data.ptr == &listener_) {
+        accept_clients();
         continue;
       }
-
-      if (obj->fd == listener_.fd()) {
-        listener_.try_accept(epoll_);
-        continue;
-      }
-
-      handle_client_events(events[i]);
+      handle_client_event(event);
     }
   }
 }
 
-void Server::handle_client_events(epoll_event &ev) {
+void Server::accept_clients() {
+  while (auto client = listener_.try_accept()) {
+    register_client(std::move(client));
+  }
+}
 
-  auto *obj = static_cast<net::ClientObject *>(ev.data.ptr);
-  uint32_t event = ev.events;
-  if (event == EPOLLIN) {
-    parser::read_from_client(epoll_.fd(), ev);
-    ev.events = EPOLLOUT;
-    epoll_.modify(ev);
+void Server::register_client(std::unique_ptr<net::ClientObject> client) {
+  net::ClientObject *raw = client.get();
+  epoll_.add(raw->socket.fd(), make_event(EPOLLIN, raw));
+  std::ignore = client.release();
+}
+
+void Server::disconnect_client(net::ClientObject &client) {
+  const int fd = client.socket.fd();
+  std::unique_ptr<net::ClientObject> owner{&client};
+  epoll_.remove(fd);
+}
+
+void Server::handle_client_event(epoll_event event) {
+  auto *client = static_cast<net::ClientObject *>(event.data.ptr);
+
+  if ((event.events & (EPOLLERR | EPOLLHUP)) != 0) {
+    disconnect_client(*client);
+    return;
   }
 
-  if (event == EPOLLOUT) {
-    parser::write_to_client(epoll_.fd(), ev);
-    ev.events=EPOLLHUP;
-    epoll_.modify(ev);
+  if ((event.events & EPOLLIN) != 0) {
+    switch (parser::read_from_client(*client)) {
+    case parser::IoResult::ok:
+      event.events = EPOLLOUT;
+      epoll_.modify(client->socket.fd(), event);
+      break;
+    case parser::IoResult::would_block:
+      break;
+    case parser::IoResult::closed:
+      disconnect_client(*client);
+      break;
+    }
+    return;
+  }
+
+  if ((event.events & EPOLLOUT) != 0) {
+    switch (parser::write_to_client(*client)) {
+    case parser::IoResult::ok:
+      event.events = EPOLLIN;
+      epoll_.modify(client->socket.fd(), event);
+      break;
+    case parser::IoResult::would_block:
+      break;
+    case parser::IoResult::closed:
+      disconnect_client(*client);
+      break;
+    }
   }
 }
 

@@ -1,53 +1,87 @@
+#include "parser/parser.h"
 
-#include "parser.h"
 #include "net/socket.h"
+
+#include <array>
 #include <cerrno>
+#include <cstddef>
 #include <iostream>
-#include <sys/epoll.h>
+#include <string_view>
+#include <sys/socket.h>
 #include <system_error>
-#include <unistd.h>
+#include <utility>
 
 namespace corekv::parser {
+namespace {
 
-bool read_from_client(int epoll_fd, epoll_event &ev) {
-  auto *obj = static_cast<net::ClientObject *>(ev.data.ptr);
-  char buff[1024];
-  ssize_t rv = read(obj->fd, buff, sizeof(buff) - 1);
+constexpr std::size_t kReadChunkSize = 1024;
+constexpr std::string_view kGreeting = "Hello from server!";
 
-  if (rv < 0) {
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      return true;
+} // namespace
+
+IoResult read_from_client(net::ClientObject &client) {
+  std::array<char, kReadChunkSize> buffer{};
+
+  while (true) {
+    const ssize_t received =
+        ::recv(client.socket.fd(), buffer.data(), buffer.size(), 0);
+
+    if (received > 0) {
+      std::cout << "Message from client: "
+                << std::string_view{buffer.data(),
+                                    static_cast<std::size_t>(received)}
+                << '\n';
+      return IoResult::ok;
     }
+
+    if (received == 0) {
+      std::clog << "Client disconnected.\n";
+      return IoResult::closed;
+    }
+
+    if (errno == EINTR) {
+      continue;
+    }
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      return IoResult::would_block;
+    }
+    if (errno == ECONNRESET) {
+      return IoResult::closed;
+    }
+
     throw std::system_error(errno, std::generic_category(),
                             "Failed to read from socket");
   }
-
-  if (rv == 0) {
-    std::cout << "Client disconnected.\n";
-    return false;
-  }
-
-  buff[rv] = '\0';
-  std::cout << "message from client: " << buff << "\n";
-
-  return true;
 }
 
-bool write_to_client(int epoll_fd, epoll_event &ev) {
+IoResult write_to_client(net::ClientObject &client) {
+  while (true) {
+    const ssize_t sent = ::send(client.socket.fd(), kGreeting.data(),
+                                kGreeting.size(), MSG_NOSIGNAL);
 
-  auto *obj = static_cast<net::ClientObject *>(ev.data.ptr);
-  std::string msg{"Hello from server!"};
-
-  ssize_t wt = write(obj->fd, msg.data(), msg.size());
-  if (wt < 0) {
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      return true;
+    if (std::cmp_equal(sent, kGreeting.size())) {
+      return IoResult::ok;
     }
+
+    if (sent == 0) {
+      return IoResult::closed;
+    }
+    if (sent > 0) {
+      return IoResult::closed;
+    }
+    if (errno == EINTR) {
+      continue;
+    }
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      return IoResult::would_block;
+    }
+    if (errno == EPIPE || errno == ECONNRESET) {
+      return IoResult::closed;
+    }
+
     throw std::system_error(errno, std::generic_category(),
                             "Failed to write to socket");
   }
-
-  return false;
 }
 
 } // namespace corekv::parser

@@ -1,14 +1,13 @@
 #pragma once
 
-#include <iostream>
+#include <span>
 #include <sys/epoll.h>
-#include <vector>
 
 namespace corekv::net {
 
 class Epoll {
 public:
-  Epoll() = default;
+  Epoll();
   ~Epoll();
 
   Epoll(const Epoll &) = delete;
@@ -18,14 +17,17 @@ public:
   Epoll &operator=(Epoll &&other) noexcept;
 
   [[nodiscard]] int fd() const noexcept;
-  void create();
-  void add(epoll_event &ev);
-  void modify(epoll_event &ev);
-  void remove(epoll_event &ev);
-  int wait(std::vector<epoll_event> &events);
-  void close();
+
+  void add(int fd, const epoll_event &event) const;
+  void modify(int fd, const epoll_event &event) const;
+  void remove(int fd) const;
+
+  [[nodiscard]] std::span<epoll_event>
+  wait(std::span<epoll_event> events) const;
 
 private:
+  void close() noexcept;
+
   int fd_{-1};
 };
 

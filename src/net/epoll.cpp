@@ -1,26 +1,35 @@
-#include "epoll.h"
-#include "socket.h"
+#include "net/epoll.h"
+
 #include <cerrno>
-#include <sys/epoll.h>
+#include <cstddef>
+#include <stdexcept>
 #include <system_error>
 #include <unistd.h>
+#include <utility>
 
 namespace corekv::net {
 
-Epoll::Epoll(Epoll &&other) noexcept : fd_(other.fd_) { other.fd_ = -1; }
+Epoll::Epoll() {
+  fd_ = ::epoll_create1(EPOLL_CLOEXEC);
+  if (fd_ < 0) {
+    throw std::system_error(errno, std::generic_category(),
+                            "Failed to create epoll instance");
+  }
+}
+
+Epoll::Epoll(Epoll &&other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
 
 Epoll &Epoll::operator=(Epoll &&other) noexcept {
   if (this != &other) {
     close();
-    fd_ = other.fd_;
-    other.fd_ = -1;
+    fd_ = std::exchange(other.fd_, -1);
   }
   return *this;
 }
 
 Epoll::~Epoll() { close(); }
 
-void Epoll::close() {
+void Epoll::close() noexcept {
   if (fd_ >= 0) {
     ::close(fd_);
     fd_ = -1;
@@ -29,52 +38,50 @@ void Epoll::close() {
 
 int Epoll::fd() const noexcept { return fd_; }
 
-void Epoll::create() {
-  fd_ = epoll_create1(0);
-  if (fd_ < 0) {
+void Epoll::add(int fd, const epoll_event &event) const {
+  // epoll_ctl predates const-correctness and takes a non-const pointer even
+  // though it does not modify the event.
+  epoll_event copy = event;
+  if (::epoll_ctl(fd_, EPOLL_CTL_ADD, fd, &copy) < 0) {
     throw std::system_error(errno, std::generic_category(),
-                            "Failed to create epoll instance");
+                            "Failed to add descriptor to epoll");
   }
 }
 
-void Epoll::add(epoll_event &ev) {
-  auto *client = static_cast<ClientObject *>(ev.data.ptr);
-  if (epoll_ctl(fd_, EPOLL_CTL_ADD, client->fd, &ev) < 0) {
+void Epoll::modify(int fd, const epoll_event &event) const {
+  epoll_event copy = event;
+  if (::epoll_ctl(fd_, EPOLL_CTL_MOD, fd, &copy) < 0) {
     throw std::system_error(errno, std::generic_category(),
-                            "Failed to add socket to epoll");
+                            "Failed to modify descriptor in epoll");
   }
 }
 
-void Epoll::modify(epoll_event &ev) {
-  auto *client = static_cast<ClientObject *>(ev.data.ptr);
-  if (epoll_ctl(fd_, EPOLL_CTL_MOD, client->fd, &ev) < 0) {
+void Epoll::remove(int fd) const {
+  if (::epoll_ctl(fd_, EPOLL_CTL_DEL, fd, nullptr) < 0) {
     throw std::system_error(errno, std::generic_category(),
-                            "Failed to modify socket in epoll");
+                            "Failed to remove descriptor from epoll");
   }
 }
 
-void Epoll::remove(epoll_event &ev) {
-  auto *client = static_cast<ClientObject *>(ev.data.ptr);
-  if (epoll_ctl(fd_, EPOLL_CTL_DEL, client->fd, &ev) < 0) {
-    throw std::system_error(errno, std::generic_category(),
-                            "Failed to remove socket from epoll");
+std::span<epoll_event> Epoll::wait(std::span<epoll_event> events) const {
+  if (events.empty()) {
+    throw std::invalid_argument{"Epoll::wait requires a non-empty buffer"};
   }
-  delete client;
-}
 
-int Epoll::wait(std::vector<epoll_event> &events) {
   while (true) {
-    int ndfs =
-        epoll_wait(fd_, events.data(), static_cast<int>(events.size()), -1);
+    const int ready =
+        ::epoll_wait(fd_, events.data(), static_cast<int>(events.size()), -1);
 
-    if (ndfs < 0) {
-      if (errno == EINTR)
+    if (ready < 0) {
+      if (errno == EINTR) {
         continue;
+      }
       throw std::system_error(errno, std::generic_category(),
                               "epoll_wait failed");
     }
 
-    return ndfs;
+    //set the std::span size equals to ready not the std::array's size
+    return events.first(static_cast<std::size_t>(ready));
   }
 }
 

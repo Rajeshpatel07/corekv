@@ -1,21 +1,19 @@
 #pragma once
 
-#include "net/epoll.h"
+#include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <utility>
 #include <vector>
 
 namespace corekv::net {
 
-struct ClientObject {
-  int fd{-1};
-  std::vector<uint8_t> read_buffer;
-  std::vector<uint8_t> write_buffer;
-};
+inline constexpr std::uint16_t kDefaultTcpPort = 8000;
 
 class Socket {
 public:
-  Socket() = default;
-  explicit Socket(int fd);
+  Socket() noexcept = default;
+  explicit Socket(int fd) noexcept;
 
   Socket(const Socket &) = delete;
   Socket &operator=(const Socket &) = delete;
@@ -25,32 +23,46 @@ public:
 
   ~Socket();
 
-  void close();
+  void close() noexcept;
   [[nodiscard]] int fd() const noexcept;
-  void set_socket_nonblocking();
+  void set_nonblocking() const;
 
 private:
   int fd_{-1};
 };
 
+struct ClientObject {
+  explicit ClientObject(Socket owned_socket) noexcept
+      : socket(std::move(owned_socket)) {}
+
+  ClientObject(const ClientObject &) = delete;
+  ClientObject &operator=(const ClientObject &) = delete;
+  ClientObject(ClientObject &&) = delete;
+  ClientObject &operator=(ClientObject &&) = delete;
+
+  Socket socket;
+  std::vector<std::uint8_t> read_buffer;
+  std::vector<std::uint8_t> write_buffer;
+};
+
 class TcpListener {
 public:
-  TcpListener() = default;
+  TcpListener();
+  ~TcpListener() = default;
 
   TcpListener(const TcpListener &) = delete;
   TcpListener &operator=(const TcpListener &) = delete;
 
-  TcpListener(TcpListener &&other) noexcept;
-  TcpListener &operator=(TcpListener &&other) noexcept;
-
-  ~TcpListener() = default;
+  TcpListener(TcpListener &&other) noexcept = default;
+  TcpListener &operator=(TcpListener &&other) noexcept = default;
 
   [[nodiscard]] int fd() const noexcept;
-  void open();
-  void try_accept(Epoll &epoll_instance);
-  void close();
+
+  [[nodiscard]] std::unique_ptr<ClientObject> try_accept();
 
 private:
+  void open();
+
   Socket socket_;
 };
 
