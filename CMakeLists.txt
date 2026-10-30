@@ -9,7 +9,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_library(corekv_header INTERFACE)
 target_include_directories(corekv_header INTERFACE src)
 
-add_library(corekv_source STATIC src/core/network.cpp src/parser/parser.cpp)
+add_library(corekv_source STATIC src/server/server.cpp src/net/socket.cpp src/net/epoll.cpp src/parser/parser.cpp)
 target_link_libraries(corekv_source PRIVATE corekv_header)
 
 add_executable(corekv src/main.cpp)

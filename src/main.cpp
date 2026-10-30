@@ -1,11 +1,10 @@
-#include "core/network.h"
+#include "server/server.h"
 #include <exception>
 #include <iostream>
-#include <vector>
 
 int main(int argc, char **argv) {
   try {
-    Corekv::Server server(8000);
+    corekv::server::Server app;
   } catch (std::exception &e) {
     std::cerr << e.what() << "\n";
   }

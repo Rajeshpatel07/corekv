@@ -115,11 +115,15 @@ void TcpListener::try_accept(Epoll &epoll_instance) {
     auto *client_obj = new ClientObject{client_fd, {}, {}};
 
     epoll_event ev{};
-    ev.events = EPOLLIN | EPOLLET;
+    ev.events = EPOLLIN;
     ev.data.ptr = client_obj;
 
     epoll_instance.add(ev);
   }
+}
+
+void TcpListener::close(){
+  socket_.close();
 }
 
 } // namespace corekv::net
