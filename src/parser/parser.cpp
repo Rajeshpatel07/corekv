@@ -5,6 +5,7 @@
 #include <array>
 #include <cerrno>
 #include <cstddef>
+#include <cstring>
 #include <iostream>
 #include <string_view>
 #include <sys/socket.h>
@@ -19,39 +20,108 @@ constexpr std::string_view kGreeting = "Hello from server!";
 
 } // namespace
 
+inline void write_to_buffer(const uint8_t *src, std::vector<uint8_t> &dist,
+                            const uint64_t size) {
+  if (size == 0)
+    return;
+  dist.insert(dist.end(), src, src + size);
+}
+
+inline void read_from_buffer(std::vector<uint8_t> &src, uint8_t *dist,
+                             uint64_t size, size_t &read_offset) {
+  if (read_offset + size > src.size()) {
+    throw std::out_of_range("Attempted to read past buffer bounds");
+  }
+
+  std::memcpy(dist, src.data() + read_offset, size);
+  read_offset += size;
+
+  if (read_offset == src.size()) {
+    src.clear();
+    read_offset = 0;
+  }
+}
+
 IoResult read_from_client(net::ClientObject &client) {
   std::array<char, kReadChunkSize> buffer{};
+  bool received_any_data = false;
 
   while (true) {
     const ssize_t received =
         ::recv(client.socket.fd(), buffer.data(), buffer.size(), 0);
 
-    if (received > 0) {
-      std::cout << "Message from client: "
-                << std::string_view{buffer.data(),
-                                    static_cast<std::size_t>(received)}
-                << '\n';
-      return IoResult::ok;
-    }
-
     if (received == 0) {
-      std::clog << "Client disconnected.\n";
       return IoResult::closed;
     }
 
-    if (errno == EINTR) {
-      continue;
-    }
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      return IoResult::would_block;
-    }
-    if (errno == ECONNRESET) {
+    if (received < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        break;
+      }
+
+      std::clog << "Client read error.\n";
       return IoResult::closed;
     }
 
-    throw std::system_error(errno, std::generic_category(),
-                            "Failed to read from socket");
+    write_to_buffer(reinterpret_cast<const uint8_t *>(buffer.data()),
+                    client.read_buffer, static_cast<uint64_t>(received));
+    received_any_data = true;
   }
+
+  if (received_any_data && client.read_offset < client.read_buffer.size()) {
+    parser_handler(client);
+  }
+
+  return IoResult::ok;
+}
+
+void parser_handler(net::ClientObject &client) {
+  if (client.read_offset >= client.read_buffer.size()) {
+    return;
+  }
+  uint8_t type = client.read_buffer[client.read_offset];
+
+  switch (type) {
+  case '+':
+    decode_simple_string(client);
+    break;
+  default:
+    // NOTE: Handle protocol error / unknown command type
+    break;
+  }
+}
+
+// Handle RESP simple string
+std::string decode_simple_string(net::ClientObject &client) {
+  size_t crlf_pos = std::string::npos;
+  for (size_t i = client.read_offset + 1; i < client.read_buffer.size() - 1;
+       ++i) {
+    if (client.read_buffer[i] == '\r' && client.read_buffer[i + 1] == '\n') {
+      crlf_pos = i;
+      break;
+    }
+  }
+
+  if (crlf_pos == std::string::npos) {
+    return "";
+  }
+
+  size_t data_len = crlf_pos - (client.read_offset + 1);
+
+  std::string payload(data_len, '\0');
+  client.read_offset += 1;
+
+  read_from_buffer(client.read_buffer,
+                   reinterpret_cast<uint8_t *>(payload.data()), data_len,
+                   client.read_offset);
+
+  client.read_offset += 2;
+
+  std::cout << "client simple string: " << payload << "\n";
+  return payload;
 }
 
 IoResult write_to_client(net::ClientObject &client) {

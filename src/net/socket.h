@@ -43,6 +43,7 @@ struct ClientObject {
   Socket socket;
   std::vector<std::uint8_t> read_buffer;
   std::vector<std::uint8_t> write_buffer;
+  uint64_t read_offset{0};
 };
 
 class TcpListener {
