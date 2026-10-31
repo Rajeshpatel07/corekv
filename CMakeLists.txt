@@ -30,6 +30,7 @@ add_library(corekv_core STATIC
   src/net/epoll.cpp
   src/net/socket.cpp
   src/parser/parser.cpp
+  src/parser/resp.cpp
   src/server/server.cpp
 )
 
