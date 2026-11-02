@@ -6,7 +6,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Keep warnings in one place so every target is compiled with the same rules.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the build type (Debug, Release)" FORCE)
+endif()
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
 function(corekv_enable_warnings target)
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${target} PRIVATE
@@ -22,9 +27,6 @@ function(corekv_enable_warnings target)
   endif()
 endfunction()
 
-# The db sources are compiled even though the server does not use them yet, so
-# they cannot silently rot. C++20 is requested project-wide and also propagated
-# to consumers through target_compile_features.
 add_library(corekv_core STATIC
   src/db/hashtable.cpp
   src/net/epoll.cpp
@@ -34,14 +36,22 @@ add_library(corekv_core STATIC
   src/server/server.cpp
 )
 
-# Namespaced alias: consumers link corekv::core, never a bare target name.
 add_library(corekv::core ALIAS corekv_core)
 
-# PUBLIC because anything linking corekv_core needs the project headers too.
 target_include_directories(corekv_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_compile_features(corekv_core PUBLIC cxx_std_20)
 corekv_enable_warnings(corekv_core)
 
+target_compile_options(corekv_core PRIVATE
+  $<$<CONFIG:Release>:-O3 -DNDEBUG>
+  $<$<CONFIG:Debug>:-g -O0>
+)
+
 add_executable(corekv src/main.cpp)
 target_link_libraries(corekv PRIVATE corekv::core)
 corekv_enable_warnings(corekv)
+
+target_compile_options(corekv PRIVATE
+  $<$<CONFIG:Release>:-O3 -DNDEBUG>
+  $<$<CONFIG:Debug>:-g -O0>
+)
