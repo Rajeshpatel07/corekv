@@ -96,8 +96,13 @@ void parser_handler(net::ClientObject &client) {
   case ':':
     std::cout << "integer: " << RESP::decode_integer(client) << "\n";
     break;
+  case '(':
+    std::cout << "Big number: " << RESP::decode_big_numbers(client) << "\n";
+    break;
+  case '*':
+    RESP::decode_array(client);
+    break;
   default:
-    // NOTE: Handle protocol error / unknown command type
     break;
   }
 }
