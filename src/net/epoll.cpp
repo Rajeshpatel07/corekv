@@ -80,7 +80,7 @@ std::span<epoll_event> Epoll::wait(std::span<epoll_event> events) const {
                               "epoll_wait failed");
     }
 
-    //set the std::span size equals to ready not the std::array's size
+    // set the std::span size equals to ready not the std::array's size
     return events.first(static_cast<std::size_t>(ready));
   }
 }

@@ -21,8 +21,8 @@ constexpr std::string_view kGreeting = "Hello from server!";
 
 } // namespace
 
-inline void write_to_buffer(const uint8_t *src, std::vector<uint8_t> &dist,
-                            const uint64_t size) {
+inline void append_to_buffer(const uint8_t *src, std::vector<uint8_t> &dist,
+                             const uint64_t size) {
   if (size == 0)
     return;
   dist.insert(dist.end(), src, src + size);
@@ -67,8 +67,8 @@ IoResult read_from_client(net::ClientObject &client) {
       return IoResult::closed;
     }
 
-    write_to_buffer(reinterpret_cast<const uint8_t *>(buffer.data()),
-                    client.read_buffer, static_cast<uint64_t>(received));
+    append_to_buffer(reinterpret_cast<const uint8_t *>(buffer.data()),
+                     client.read_buffer, static_cast<uint64_t>(received));
     received_any_data = true;
   }
 
@@ -99,10 +99,15 @@ void parser_handler(net::ClientObject &client) {
   case '(':
     std::cout << "Big number: " << RESP::decode_big_numbers(client) << "\n";
     break;
-  case '*':
-    RESP::decode_array(client);
+  case '*': {
+    RESP::RespValue root_array = RESP::decode_array(client);
+    std::cout << "--- Received RESP Array Command ---\n";
+    RESP::print_resp_value(root_array);
+    std::cout << "-----------------------------------\n";
     break;
+  } break;
   default:
+    // FIX: Implement Error
     break;
   }
 }

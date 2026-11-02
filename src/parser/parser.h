@@ -17,8 +17,8 @@ enum class IoResult : std::uint8_t {
   closed,
 };
 
-void write_to_buffer(const uint8_t *src, std::vector<uint8_t> &dist,
-                     const uint64_t size);
+void append_to_buffer(const uint8_t *src, std::vector<uint8_t> &dist,
+                      const uint64_t size);
 void read_from_buffer(std::vector<uint8_t> &src, uint8_t *dist, uint64_t size,
                       size_t &read_offset);
 

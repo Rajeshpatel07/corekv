@@ -1,10 +1,40 @@
 #include "resp.h"
+#include "net/socket.h"
 #include "parser/parser.h"
 #include <cstring>
+#include <iostream>
 #include <netinet/in.h>
 #include <string>
 
 namespace corekv::RESP {
+
+void print_resp_value(const RespValue &val, size_t indent) {
+  std::string prefix(indent, ' ');
+
+  std::visit(
+      [&prefix, indent](const auto &arg) {
+        using T = std::decay_t<decltype(arg)>;
+
+        if constexpr (std::is_same_v<T, std::string>) {
+          std::cout << prefix << "[String] " << arg << "\n";
+        } else if constexpr (std::is_same_v<T, int64_t>) {
+          std::cout << prefix << "[Integer] " << arg << "\n";
+        } else if constexpr (std::is_same_v<T, std::unique_ptr<RespArray>>) {
+          if (arg) {
+            std::cout << prefix << "[Nested Array, size: " << arg->size()
+                      << "]\n";
+            // RECURSION: Traverse each element inside the nested array
+            for (const auto &item : *arg) {
+              print_resp_value(item,
+                               indent + 2); // Indent sub-items for readability
+            }
+          } else {
+            std::cout << prefix << "[Null/Empty Array]\n";
+          }
+        }
+      },
+      val.data);
+}
 
 // Handle RESP simple string
 std::string decode_simple_string(net::ClientObject &client) {
@@ -125,6 +155,11 @@ int64_t decode_big_numbers(net::ClientObject &client) {
     }
   }
 
+  if (crlf_pos == std::string::npos) {
+    // FIX: Throw Error
+    return 0;
+  }
+
   size_t num_len = crlf_pos - client.read_offset;
 
   std::string num(num_len, '\0');
@@ -134,7 +169,7 @@ int64_t decode_big_numbers(net::ClientObject &client) {
 
   client.read_offset += 2;
 
-  int64_t response = stoi(num);
+  int64_t response = stoll(num);
   if (is_negative) {
     response *= -1;
   }
@@ -208,6 +243,30 @@ RespValue decode_array(net::ClientObject &client) {
   RespValue result;
   result.data = std::move(arr);
   return result;
+}
+
+void encode_simple_string(net::ClientObject &client, const std::string &data) {
+  std::string str{"+" + data + "\r\n"};
+  parser::append_to_buffer(reinterpret_cast<uint8_t *>(str.data()),
+                           client.write_buffer, str.size());
+}
+
+void encode_bulk_string(net::ClientObject &client, const std::string &data) {
+  std::string str{"$" + std::to_string(data.size()) + "\r\n" + data + "\r\n"};
+  parser::append_to_buffer(reinterpret_cast<uint8_t *>(str.data()),
+                           client.write_buffer, str.size());
+}
+
+void encode_integer(net::ClientObject &client, int32_t num) {
+  std::string str{":" + std::to_string(num) + "\r\n"};
+  parser::append_to_buffer(reinterpret_cast<uint8_t *>(str.data()),
+                           client.write_buffer, str.size());
+}
+
+void encode_big_number(net::ClientObject &client, int64_t num) {
+  std::string str{"(" + std::to_string(num) + "\r\n"};
+  parser::append_to_buffer(reinterpret_cast<uint8_t *>(str.data()),
+                           client.write_buffer, str.size());
 }
 
 } // namespace corekv::RESP

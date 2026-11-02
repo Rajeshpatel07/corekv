@@ -26,13 +26,17 @@ struct RespValue {
   }
 };
 
+void print_resp_value(const RespValue &val, size_t indent = 0);
 std::string decode_simple_string(net::ClientObject &client);
 std::string decode_bulk_string(net::ClientObject &client);
 int decode_integer(net::ClientObject &client);
 int64_t decode_big_numbers(net::ClientObject &client);
 RespValue decode_array(net::ClientObject &client);
 
-// NOTE: implement all the function below
-// std::string decode_simple_error(net::ClientObject &client);
+// WARN: Need performance Improvements
+void encode_simple_string(net::ClientObject &client, std::string &data);
+void encode_bulk_string(net::ClientObject &client, std::string &data);
+void encode_integer(net::ClientObject &client, int32_t num);
+void encode_big_number(net::ClientObject &client, int64_t num);
 
 } // namespace corekv::RESP
