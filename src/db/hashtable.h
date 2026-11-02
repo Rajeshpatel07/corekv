@@ -9,7 +9,7 @@
 namespace corekv::db {
 
 #define CONTAINER_OF(ptr, T, member)                                           \
-  ((T *)((char *)(ptr) - offsetof(T, member)))
+  (reinterpret_cast<T *>(reinterpret_cast<char *>(ptr) - offsetof(T, member)))
 
 // NOTE: Move all of these into a constants.h file for single place to modify
 // everything.
@@ -79,4 +79,4 @@ public:
   [[nodiscard]] HashNode *remove(HashNode *node);
 };
 
-} // namespace Corekv
+} // namespace corekv::db
