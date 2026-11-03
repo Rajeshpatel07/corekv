@@ -28,6 +28,7 @@ function(corekv_enable_warnings target)
 endfunction()
 
 add_library(corekv_core STATIC
+  src/command/executor.cpp
   src/db/hashtable.cpp
   src/net/epoll.cpp
   src/net/socket.cpp
