@@ -8,7 +8,7 @@
 
 namespace corekv::net {
 
-inline constexpr std::uint16_t kDefaultTcpPort = 8000;
+inline constexpr std::uint16_t kDefaultTcpPort = 8080;
 
 class Socket {
 public:
@@ -43,7 +43,8 @@ struct ClientObject {
   Socket socket;
   std::vector<std::uint8_t> read_buffer;
   std::vector<std::uint8_t> write_buffer;
-  uint64_t read_offset{0};
+  std::size_t read_offset{0};
+  std::size_t write_offset{0};
 };
 
 class TcpListener {

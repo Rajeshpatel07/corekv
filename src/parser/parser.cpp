@@ -1,30 +1,32 @@
 #include "parser/parser.h"
-#include "resp.h"
 
+#include "command/executor.h"
 #include "net/socket.h"
+#include "parser/resp.h"
 
 #include <array>
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <exception>
 #include <iostream>
-#include <string_view>
+#include <string>
 #include <sys/socket.h>
 #include <system_error>
-#include <utility>
 
 namespace corekv::parser {
 namespace {
 
 constexpr std::size_t kReadChunkSize = 1024;
-constexpr std::string_view kGreeting = "Hello from server!";
 
 } // namespace
 
-inline void append_to_buffer(const uint8_t *src, std::vector<uint8_t> &dist,
-                             const uint64_t size) {
-  if (size == 0)
+void append_to_buffer(const uint8_t *src, std::vector<uint8_t> &dist,
+                      const uint64_t size) {
+  if (size == 0) {
     return;
+  }
   dist.insert(dist.end(), src, src + size);
 }
 
@@ -83,48 +85,59 @@ void parser_handler(net::ClientObject &client) {
   if (client.read_offset >= client.read_buffer.size()) {
     return;
   }
-  uint8_t type = client.read_buffer[client.read_offset];
+  const std::uint8_t type = client.read_buffer[client.read_offset];
 
-  switch (type) {
-  case '+':
-    std::cout << "simple string: " << RESP::decode_simple_string(client)
-              << "\n";
-    break;
-  case '$':
-    std::cout << "bulk string: " << RESP::decode_bulk_string(client) << "\n";
-    break;
-  case ':':
-    std::cout << "integer: " << RESP::decode_integer(client) << "\n";
-    break;
-  case '(':
-    std::cout << "Big number: " << RESP::decode_big_numbers(client) << "\n";
-    break;
-  case '*': {
-    RESP::RespValue root_array = RESP::decode_array(client);
-    std::cout << "--- Received RESP Array Command ---\n";
-    RESP::print_resp_value(root_array);
-    std::cout << "-----------------------------------\n";
-    break;
-  } break;
-  default:
-    // FIX: Implement Error
-    break;
+  try {
+    switch (type) {
+    case '+':
+      std::cout << "simple string: " << RESP::decode_simple_string(client)
+                << "\n";
+      break;
+    case '$':
+      std::cout << "bulk string: " << RESP::decode_bulk_string(client) << "\n";
+      break;
+    case ':':
+      std::cout << "integer: " << RESP::decode_integer(client) << "\n";
+      break;
+    case '(':
+      std::cout << "Big number: " << RESP::decode_big_numbers(client) << "\n";
+      break;
+    case '*': {
+      const RESP::RespValue command = RESP::decode_array(client);
+      executor::execute_command(client, command);
+      break;
+    }
+    default: {
+      std::clog << "Unknown RESP type: " << static_cast<unsigned int>(type)
+                << '\n';
+      client.read_buffer.clear();
+      client.read_offset = 0;
+      RESP::encode_simple_error(client, "ERR unknown RESP type");
+      break;
+    }
+    }
+  } catch (const std::exception &error) {
+    std::clog << "RESP decode error: " << error.what() << '\n';
+    client.read_buffer.clear();
+    client.read_offset = 0;
+    RESP::encode_simple_error(client, std::string{"ERR Protocol error: "} +
+                                          error.what());
   }
 }
 
 IoResult write_to_client(net::ClientObject &client) {
-  while (true) {
-    const ssize_t sent = ::send(client.socket.fd(), kGreeting.data(),
-                                kGreeting.size(), MSG_NOSIGNAL);
+  while (client.write_offset < client.write_buffer.size()) {
+    const std::size_t remaining =
+        client.write_buffer.size() - client.write_offset;
+    const ssize_t sent = ::send(
+        client.socket.fd(), client.write_buffer.data() + client.write_offset,
+        remaining, MSG_NOSIGNAL);
 
-    if (std::cmp_equal(sent, kGreeting.size())) {
-      return IoResult::ok;
-    }
-
-    if (sent == 0) {
-      return IoResult::closed;
-    }
     if (sent > 0) {
+      client.write_offset += static_cast<std::size_t>(sent);
+      continue;
+    }
+    if (sent == 0) {
       return IoResult::closed;
     }
     if (errno == EINTR) {
@@ -140,6 +153,10 @@ IoResult write_to_client(net::ClientObject &client) {
     throw std::system_error(errno, std::generic_category(),
                             "Failed to write to socket");
   }
+
+  client.write_buffer.clear();
+  client.write_offset = 0;
+  return IoResult::ok;
 }
 
 } // namespace corekv::parser
