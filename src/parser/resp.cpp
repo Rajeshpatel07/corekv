@@ -4,6 +4,7 @@
 #include <cstring>
 #include <iostream>
 #include <netinet/in.h>
+#include <stdexcept>
 #include <string>
 
 namespace corekv::RESP {
@@ -39,8 +40,12 @@ void print_resp_value(const RespValue &val, size_t indent) {
 // Handle RESP simple string
 std::string decode_simple_string(net::ClientObject &client) {
   client.read_offset += 1;
+  if (client.read_offset >= client.read_buffer.size()) {
+    throw std::runtime_error("RESP simple string is missing data");
+  }
+
   size_t crlf_pos = std::string::npos;
-  for (size_t i = client.read_offset; i < client.read_buffer.size() - 1; ++i) {
+  for (size_t i = client.read_offset; i + 1 < client.read_buffer.size(); ++i) {
     if (client.read_buffer[i] == '\r' && client.read_buffer[i + 1] == '\n') {
       crlf_pos = i;
       break;
@@ -48,7 +53,7 @@ std::string decode_simple_string(net::ClientObject &client) {
   }
 
   if (crlf_pos == std::string::npos) {
-    return "";
+    throw std::runtime_error("RESP simple string is missing CRLF");
   }
 
   size_t data_len = crlf_pos - (client.read_offset);
@@ -68,14 +73,21 @@ std::string decode_simple_string(net::ClientObject &client) {
 int decode_integer(net::ClientObject &client) {
 
   client.read_offset += 1;
+  if (client.read_offset >= client.read_buffer.size()) {
+    throw std::runtime_error("RESP integer is missing data");
+  }
+
   bool is_negative{client.read_buffer[client.read_offset] == '-'};
   if (is_negative) {
     client.read_offset += 1;
+    if (client.read_offset >= client.read_buffer.size()) {
+      throw std::runtime_error("RESP integer is missing data");
+    }
   }
 
   size_t crlf_pos = std::string::npos;
 
-  for (size_t i = client.read_offset; i < client.read_buffer.size() - 1; ++i) {
+  for (size_t i = client.read_offset; i + 1 < client.read_buffer.size(); ++i) {
     if (client.read_buffer[i] == '\r' && client.read_buffer[i + 1] == '\n') {
       crlf_pos = i;
       break;
@@ -83,7 +95,7 @@ int decode_integer(net::ClientObject &client) {
   }
 
   if (crlf_pos == std::string::npos) {
-    return 0;
+    throw std::runtime_error("RESP integer is missing CRLF");
   }
 
   size_t len = crlf_pos - client.read_offset;
@@ -94,7 +106,11 @@ int decode_integer(net::ClientObject &client) {
 
   client.read_offset += 2;
 
-  int response = std::stoi(payload);
+  size_t parsed = 0;
+  int response = std::stoi(payload, &parsed);
+  if (parsed != payload.size()) {
+    throw std::runtime_error("RESP integer is not a valid number");
+  }
 
   if (is_negative) {
     response *= -1;
@@ -107,8 +123,12 @@ int decode_integer(net::ClientObject &client) {
 std::string decode_bulk_string(net::ClientObject &client) {
 
   client.read_offset += 1;
+  if (client.read_offset >= client.read_buffer.size()) {
+    throw std::runtime_error("RESP bulk string is missing data");
+  }
+
   size_t crlf_pos = std::string::npos;
-  for (size_t i = client.read_offset; i < client.read_buffer.size() - 1; ++i) {
+  for (size_t i = client.read_offset; i + 1 < client.read_buffer.size(); ++i) {
     if (client.read_buffer[i] == '\r' && client.read_buffer[i + 1] == '\n') {
       crlf_pos = i;
       break;
@@ -116,7 +136,7 @@ std::string decode_bulk_string(net::ClientObject &client) {
   }
 
   if (crlf_pos == std::string::npos) {
-    return "";
+    throw std::runtime_error("RESP bulk string length is missing CRLF");
   }
 
   size_t len = crlf_pos - client.read_offset;
@@ -127,13 +147,27 @@ std::string decode_bulk_string(net::ClientObject &client) {
 
   client.read_offset += 2;
 
-  size_t data_len = static_cast<size_t>(std::stoi(int_len));
+  size_t parsed = 0;
+  const int length = std::stoi(int_len, &parsed);
+  if (parsed != int_len.size()) {
+    throw std::runtime_error("RESP bulk string length is not a valid number");
+  }
+  if (length < 0) {
+    throw std::runtime_error("RESP bulk string length cannot be negative");
+  }
 
+  const size_t data_len = static_cast<size_t>(length);
   std::string response(data_len, '\0');
 
   parser::read_from_buffer(client.read_buffer,
                            reinterpret_cast<uint8_t *>(response.data()),
                            data_len, client.read_offset);
+
+  if (client.read_offset + 1 >= client.read_buffer.size() ||
+      client.read_buffer[client.read_offset] != '\r' ||
+      client.read_buffer[client.read_offset + 1] != '\n') {
+    throw std::runtime_error("RESP bulk string is missing CRLF");
+  }
   client.read_offset += 2;
 
   return response;
@@ -141,14 +175,20 @@ std::string decode_bulk_string(net::ClientObject &client) {
 
 int64_t decode_big_numbers(net::ClientObject &client) {
   client.read_offset += 1;
+  if (client.read_offset >= client.read_buffer.size()) {
+    throw std::runtime_error("RESP big number is missing data");
+  }
 
   bool is_negative = client.read_buffer[client.read_offset] == '-';
   if (is_negative) {
     client.read_offset += 1;
+    if (client.read_offset >= client.read_buffer.size()) {
+      throw std::runtime_error("RESP big number is missing data");
+    }
   }
 
   size_t crlf_pos = std::string::npos;
-  for (size_t i{client.read_offset}; i < client.read_buffer.size() - 1; ++i) {
+  for (size_t i{client.read_offset}; i + 1 < client.read_buffer.size(); ++i) {
     if (client.read_buffer[i] == '\r' && client.read_buffer[i + 1] == '\n') {
       crlf_pos = i;
       break;
@@ -156,8 +196,7 @@ int64_t decode_big_numbers(net::ClientObject &client) {
   }
 
   if (crlf_pos == std::string::npos) {
-    // FIX: Throw Error
-    return 0;
+    throw std::runtime_error("RESP big number is missing CRLF");
   }
 
   size_t num_len = crlf_pos - client.read_offset;
@@ -169,7 +208,11 @@ int64_t decode_big_numbers(net::ClientObject &client) {
 
   client.read_offset += 2;
 
-  int64_t response = stoll(num);
+  size_t parsed = 0;
+  int64_t response = std::stoll(num, &parsed);
+  if (parsed != num.size()) {
+    throw std::runtime_error("RESP big number is not a valid number");
+  }
   if (is_negative) {
     response *= -1;
   }
@@ -179,9 +222,12 @@ int64_t decode_big_numbers(net::ClientObject &client) {
 
 RespValue decode_array(net::ClientObject &client) {
   client.read_offset += 1; // Skip '*'
+  if (client.read_offset >= client.read_buffer.size()) {
+    throw std::runtime_error("RESP array is missing data");
+  }
 
   size_t crlf_pos = std::string::npos;
-  for (size_t i{client.read_offset}; i < client.read_buffer.size() - 1; ++i) {
+  for (size_t i{client.read_offset}; i + 1 < client.read_buffer.size(); ++i) {
     if (client.read_buffer[i] == '\r' && client.read_buffer[i + 1] == '\n') {
       crlf_pos = i;
       break;
@@ -189,7 +235,7 @@ RespValue decode_array(net::ClientObject &client) {
   }
 
   if (crlf_pos == std::string::npos) {
-    return RespValue{};
+    throw std::runtime_error("RESP array length is missing CRLF");
   }
 
   size_t len_str_size = crlf_pos - client.read_offset;
@@ -201,17 +247,25 @@ RespValue decode_array(net::ClientObject &client) {
 
   client.read_offset += 2;
 
-  size_t array_len = static_cast<size_t>(std::stoi(int_len));
+  size_t parsed = 0;
+  const int length = std::stoi(int_len, &parsed);
+  if (parsed != int_len.size()) {
+    throw std::runtime_error("RESP array length is not a valid number");
+  }
+  if (length < 0) {
+    throw std::runtime_error("RESP array length cannot be negative");
+  }
+  const size_t array_len = static_cast<size_t>(length);
 
   auto arr = std::make_unique<RespArray>();
   arr->reserve(array_len);
 
   for (size_t i{0}; i < array_len; ++i) {
     if (client.read_offset >= client.read_buffer.size()) {
-      break;
+      throw std::runtime_error("RESP array is missing an element");
     }
 
-    uint8_t type = client.read_buffer[client.read_offset];
+    const uint8_t type = client.read_buffer[client.read_offset];
     RespValue element;
 
     switch (type) {
@@ -234,7 +288,7 @@ RespValue decode_array(net::ClientObject &client) {
       break;
     }
     default:
-      break;
+      throw std::runtime_error("RESP array contains an unknown element type");
     }
 
     arr->push_back(std::move(element));
