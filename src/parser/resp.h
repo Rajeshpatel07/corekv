@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <variant>
+
 namespace corekv::RESP {
 
 struct RespValue;
@@ -34,9 +35,11 @@ int64_t decode_big_numbers(net::ClientObject &client);
 RespValue decode_array(net::ClientObject &client);
 
 // WARN: Need performance Improvements
-void encode_simple_string(net::ClientObject &client, std::string &data);
-void encode_bulk_string(net::ClientObject &client, std::string &data);
+void encode_simple_string(net::ClientObject &client, const std::string &data);
+void encode_bulk_string(net::ClientObject &client, const std::string &data);
 void encode_integer(net::ClientObject &client, int32_t num);
 void encode_big_number(net::ClientObject &client, int64_t num);
+void encode_simple_error(net::ClientObject &client, const std::string &message);
+void encode_bulk_error(net::ClientObject &client, const std::string &message);
 
 } // namespace corekv::RESP

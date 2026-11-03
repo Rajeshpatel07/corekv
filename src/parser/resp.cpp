@@ -269,4 +269,18 @@ void encode_big_number(net::ClientObject &client, int64_t num) {
                            client.write_buffer, str.size());
 }
 
+void encode_simple_error(net::ClientObject &client,
+                         const std::string &message) {
+  std::string str{"-" + message + "\r\n"};
+  parser::append_to_buffer(reinterpret_cast<uint8_t *>(str.data()),
+                           client.write_buffer, str.size());
+}
+
+void encode_bulk_error(net::ClientObject &client, const std::string &message) {
+  std::string str{"!" + std::to_string(message.size()) + "\r\n" + message +
+                  "\r\n"};
+  parser::append_to_buffer(reinterpret_cast<uint8_t *>(str.data()),
+                           client.write_buffer, str.size());
+}
+
 } // namespace corekv::RESP
