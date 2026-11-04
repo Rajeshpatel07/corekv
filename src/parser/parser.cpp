@@ -91,7 +91,7 @@ void parser_handler(net::ClientObject &client) {
     switch (type) {
     case '*': {
       const RESP::RespValue command = RESP::decode_array(client);
-      executor::execute_command(client, command);
+      executor::execution_handler(client, command);
       break;
     }
     default: {

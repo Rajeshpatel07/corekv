@@ -29,6 +29,7 @@ endfunction()
 
 add_library(corekv_core STATIC
   src/command/executor.cpp
+  src/db/db.cpp
   src/db/hashtable.cpp
   src/net/epoll.cpp
   src/net/socket.cpp
