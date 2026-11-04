@@ -2,40 +2,11 @@
 #include "net/socket.h"
 #include "parser/parser.h"
 #include <cstring>
-#include <iostream>
 #include <netinet/in.h>
 #include <stdexcept>
 #include <string>
 
 namespace corekv::RESP {
-
-void print_resp_value(const RespValue &val, size_t indent) {
-  std::string prefix(indent, ' ');
-
-  std::visit(
-      [&prefix, indent](const auto &arg) {
-        using T = std::decay_t<decltype(arg)>;
-
-        if constexpr (std::is_same_v<T, std::string>) {
-          std::cout << prefix << "[String] " << arg << "\n";
-        } else if constexpr (std::is_same_v<T, int64_t>) {
-          std::cout << prefix << "[Integer] " << arg << "\n";
-        } else if constexpr (std::is_same_v<T, std::unique_ptr<RespArray>>) {
-          if (arg) {
-            std::cout << prefix << "[Nested Array, size: " << arg->size()
-                      << "]\n";
-            // RECURSION: Traverse each element inside the nested array
-            for (const auto &item : *arg) {
-              print_resp_value(item,
-                               indent + 2); // Indent sub-items for readability
-            }
-          } else {
-            std::cout << prefix << "[Null/Empty Array]\n";
-          }
-        }
-      },
-      val.data);
-}
 
 // Handle RESP simple string
 std::string decode_simple_string(net::ClientObject &client) {

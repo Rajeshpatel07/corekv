@@ -27,7 +27,6 @@ struct RespValue {
   }
 };
 
-void print_resp_value(const RespValue &val, size_t indent = 0);
 std::string decode_simple_string(net::ClientObject &client);
 std::string decode_bulk_string(net::ClientObject &client);
 int decode_integer(net::ClientObject &client);

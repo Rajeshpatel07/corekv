@@ -89,19 +89,6 @@ void parser_handler(net::ClientObject &client) {
 
   try {
     switch (type) {
-    case '+':
-      std::cout << "simple string: " << RESP::decode_simple_string(client)
-                << "\n";
-      break;
-    case '$':
-      std::cout << "bulk string: " << RESP::decode_bulk_string(client) << "\n";
-      break;
-    case ':':
-      std::cout << "integer: " << RESP::decode_integer(client) << "\n";
-      break;
-    case '(':
-      std::cout << "Big number: " << RESP::decode_big_numbers(client) << "\n";
-      break;
     case '*': {
       const RESP::RespValue command = RESP::decode_array(client);
       executor::execute_command(client, command);
