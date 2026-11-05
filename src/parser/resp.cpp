@@ -282,6 +282,12 @@ void encode_bulk_string(net::ClientObject &client, const std::string &data) {
                            client.write_buffer, str.size());
 }
 
+void encode_null_bulk_string(net::ClientObject &client) {
+  std::string str{"$-1\r\n"};
+  parser::append_to_buffer(reinterpret_cast<uint8_t *>(str.data()),
+                           client.write_buffer, str.size());
+}
+
 void encode_integer(net::ClientObject &client, int32_t num) {
   std::string str{":" + std::to_string(num) + "\r\n"};
   parser::append_to_buffer(reinterpret_cast<uint8_t *>(str.data()),

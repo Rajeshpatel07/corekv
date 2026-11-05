@@ -1,5 +1,5 @@
-#include "db.h"
+#include "db/db.h"
 
 namespace corekv::db {
-Database db;
-}
+Database database;
+} // namespace corekv::db

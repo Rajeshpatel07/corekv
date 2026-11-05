@@ -26,6 +26,9 @@ struct HashNode {
 struct Entry {
   HashNode node;
   std::string key;
+  // TODO: need to implement this here
+  // Store RESP value types (simple string, integer, big number, array, ...)
+  // instead of only a string.
   std::string val;
 };
 

@@ -1,4 +1,5 @@
 #include "command/executor.h"
+
 #include "db/db.h"
 #include "db/hashtable.h"
 #include "net/socket.h"
@@ -6,79 +7,132 @@
 
 #include <algorithm>
 #include <cctype>
-#include <iostream>
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 namespace corekv::executor {
+namespace {
 
-[[nodiscard]] bool is_ping(std::string_view lhs) {
-  const std::string rhs{"ping"};
-  return std::ranges::equal(lhs, rhs, [](char left, char right) {
-    return std::tolower(static_cast<unsigned char>(left)) ==
-           std::tolower(static_cast<unsigned char>(right));
+[[nodiscard]] bool equals_ignore_case(std::string_view left,
+                                      std::string_view right) {
+  return std::ranges::equal(left, right, [](char lhs, char rhs) {
+    return std::tolower(static_cast<unsigned char>(lhs)) ==
+           std::tolower(static_cast<unsigned char>(rhs));
   });
+}
+
+[[nodiscard]] std::uint64_t hash_key(const std::string &key) {
+  return db::HashMap::hash(reinterpret_cast<const std::uint8_t *>(key.data()),
+                           key.size());
+}
+
+[[nodiscard]] db::Entry *find_entry(const std::string &key) {
+  db::Entry probe;
+  probe.key = key;
+  probe.node.h_code = hash_key(key);
+
+  db::HashNode *node = db::database.hash_map.lookup(&probe.node);
+  if (node == nullptr) {
+    return nullptr;
+  }
+
+  return CONTAINER_OF(node, db::Entry, node);
+}
+
+void encode_wrong_arity(net::ClientObject &client, std::string_view command) {
+  const std::string message = "ERR wrong number of arguments for '" +
+                              std::string{command} + "' command";
+  RESP::encode_simple_error(client, message);
 }
 
 void handle_ping(net::ClientObject &client) {
   RESP::encode_simple_string(client, "pong");
 }
 
-void handle_get(net::ClientObject &client, const RESP::RespArray &cmds) {
-
-  db::Entry dummy;
-  dummy.key = cmds[1].get_string();
-  dummy.node.h_code = db::db.h_map.hash(
-      reinterpret_cast<const uint8_t *>(dummy.key.data()), dummy.key.size());
-
-  db::HashNode *node{db::db.h_map.lookup(&dummy.node)};
-  if (!node) {
-    RESP::encode_simple_string(client, "nil");
+void handle_get(net::ClientObject &client, const RESP::RespArray &args) {
+  if (args.size() != 2) {
+    encode_wrong_arity(client, "get");
+    return;
+  }
+  // TODO: need to implement this here
+  // Revisit this check when hashtable values become RESP variants.
+  if (!args[1].is_string()) {
+    RESP::encode_simple_error(client, "ERR key must be a string");
     return;
   }
 
-  db::Entry *data = CONTAINER_OF(&db::db.h_map, db::Entry, node);
-  RESP::encode_simple_string(client, data->val);
+  const db::Entry *entry = find_entry(args[1].get_string());
+  if (entry == nullptr) {
+    RESP::encode_null_bulk_string(client);
+    return;
+  }
+
+  RESP::encode_bulk_string(client, entry->val);
 }
 
-void handle_set(net::ClientObject &client, const RESP::RespArray &cmds) {
+void handle_set(net::ClientObject &client, const RESP::RespArray &args) {
+  if (args.size() != 3) {
+    encode_wrong_arity(client, "set");
+    return;
+  }
+  // TODO: need to implement this here
+  // Revisit these checks when hashtable values become RESP variants.
+  if (!args[1].is_string() || !args[2].is_string()) {
+    RESP::encode_simple_error(client, "ERR key and value must be strings");
+    return;
+  }
 
-  db::Entry dummy;
-  dummy.key = cmds[1].get_string();
-  dummy.node.h_code = db::db.h_map.hash(
-      reinterpret_cast<const uint8_t *>(dummy.key.data()), dummy.key.size());
+  const std::string &key = args[1].get_string();
+  const std::string &value = args[2].get_string();
 
-  db::HashNode *node{db::db.h_map.lookup(&dummy.node)};
-  if (node) {
-    db::Entry *entry{CONTAINER_OF(&db::db.h_map, db::Entry, node)};
-    entry->val = cmds[2].get_string();
+  if (db::Entry *entry = find_entry(key)) {
+    entry->val = value;
   } else {
-    db::Entry *entry = new db::Entry();
-    entry->key = dummy.key;
-    entry->val = cmds[2].get_string();
-    entry->node.h_code = dummy.node.h_code;
-    db::db.h_map.insert(&entry->node);
+    auto new_entry = std::make_unique<db::Entry>();
+    new_entry->key = key;
+    new_entry->val = value;
+    new_entry->node.h_code = hash_key(key);
+    db::database.hash_map.insert(&new_entry->node);
+    std::ignore = new_entry.release();
   }
 
   RESP::encode_simple_string(client, "OK");
 }
 
-void handle_del(net::ClientObject &client, const RESP::RespArray &cmds) {
-  db::Entry dummy;
-  dummy.key = cmds[1].get_string();
-  dummy.node.h_code = db::db.h_map.hash(
-      reinterpret_cast<const uint8_t *>(dummy.key.data()), dummy.key.size());
-  db::HashNode *node{db::db.h_map.lookup(&dummy.node)};
-
-  if (node) {
-    delete CONTAINER_OF(&db::db.h_map, db::Entry, node);
+void handle_del(net::ClientObject &client, const RESP::RespArray &args) {
+  if (args.size() != 2) {
+    encode_wrong_arity(client, "del");
+    return;
+  }
+  // TODO: need to implement this here
+  // Revisit this check when hashtable values become RESP variants.
+  if (!args[1].is_string()) {
+    RESP::encode_simple_error(client, "ERR key must be a string");
+    return;
   }
 
-  RESP::encode_simple_string(client, "OK");
+  db::Entry *entry = find_entry(args[1].get_string());
+  if (entry == nullptr) {
+    RESP::encode_integer(client, 0);
+    return;
+  }
+
+  if (db::database.hash_map.remove(&entry->node) == nullptr) {
+    RESP::encode_simple_error(client, "ERR failed to delete key");
+    return;
+  }
+
+  delete entry;
+  RESP::encode_integer(client, 1);
 }
 
-void execution_handler(net::ClientObject &client,
-                       const RESP::RespValue &command) {
+} // namespace
+
+void execute_command(net::ClientObject &client,
+                     const RESP::RespValue &command) {
   if (!command.is_array()) {
     RESP::encode_simple_error(client, "ERR command must be an array");
     return;
@@ -86,27 +140,25 @@ void execution_handler(net::ClientObject &client,
 
   const RESP::RespArray &args = command.get_array();
   if (args.empty()) {
-    RESP::encode_simple_error(client, "ERR Invalid arguments");
+    RESP::encode_simple_error(client, "ERR empty command");
     return;
   }
-
   if (!args[0].is_string()) {
-    RESP::encode_simple_error(client, "ERR Unknown Command");
+    RESP::encode_simple_error(client, "ERR command name must be a string");
     return;
   }
 
-  const std::string cmd_type{args[0].get_string()};
-
-  if (is_ping(cmd_type)) {
+  const std::string &name = args[0].get_string();
+  if (equals_ignore_case(name, "ping")) {
     handle_ping(client);
-  } else if (cmd_type == "get") {
+  } else if (equals_ignore_case(name, "get")) {
     handle_get(client, args);
-  } else if (cmd_type == "set") {
+  } else if (equals_ignore_case(name, "set")) {
     handle_set(client, args);
-  } else if (cmd_type == "del") {
+  } else if (equals_ignore_case(name, "del")) {
     handle_del(client, args);
   } else {
-    RESP::encode_simple_error(client, "ERR Unknown Command '" + cmd_type + "'");
+    RESP::encode_simple_error(client, "ERR unknown command '" + name + "'");
   }
 }
 

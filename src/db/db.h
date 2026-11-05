@@ -1,12 +1,13 @@
 #pragma once
 
-#include "hashtable.h"
+#include "db/hashtable.h"
 
 namespace corekv::db {
-// NOTE: For now this is just a simple db, implement shards and helper functions
+// NOTE: Single shared database for now. Sharding and helper functions will be
+// added later.
 struct Database {
-  HashMap h_map;
+  HashMap hash_map;
 };
 
-extern Database db;
+extern Database database;
 } // namespace corekv::db
