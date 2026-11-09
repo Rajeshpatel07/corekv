@@ -20,6 +20,22 @@ namespace {
 
 constexpr std::size_t kReadChunkSize = 1024;
 
+void compact_read_buffer(net::ClientObject &client) {
+  if (client.read_offset == 0) {
+    return;
+  }
+
+  if (client.read_offset >= client.read_buffer.size()) {
+    client.read_buffer.clear();
+  } else {
+    client.read_buffer.erase(
+        client.read_buffer.begin(),
+        client.read_buffer.begin() +
+            static_cast<std::ptrdiff_t>(client.read_offset));
+  }
+  client.read_offset = 0;
+}
+
 } // namespace
 
 void append_to_buffer(const uint8_t *src, std::vector<uint8_t> &dist,
@@ -30,19 +46,16 @@ void append_to_buffer(const uint8_t *src, std::vector<uint8_t> &dist,
   dist.insert(dist.end(), src, src + size);
 }
 
-void read_from_buffer(std::vector<uint8_t> &src, uint8_t *dist, uint64_t size,
-                      size_t &read_offset) {
-  if (read_offset + size > src.size()) {
-    throw std::out_of_range("Attempted to read past buffer bounds");
+void read_from_buffer(const std::vector<uint8_t> &src, uint8_t *dist,
+                      std::size_t size, std::size_t &read_offset) {
+  if (read_offset > src.size() || size > src.size() - read_offset) {
+    throw RESP::IncompleteFrame{};
   }
 
-  std::memcpy(dist, src.data() + read_offset, size);
+  if (size != 0) {
+    std::memcpy(dist, src.data() + read_offset, size);
+  }
   read_offset += size;
-
-  if (read_offset >= src.size()) {
-    src.clear();
-    read_offset = 0;
-  }
 }
 
 IoResult read_from_client(net::ClientObject &client) {
@@ -78,38 +91,41 @@ IoResult read_from_client(net::ClientObject &client) {
     parser_handler(client);
   }
 
-  return IoResult::ok;
+  return client.write_buffer.empty() ? IoResult::would_block : IoResult::ok;
 }
 
 void parser_handler(net::ClientObject &client) {
-  if (client.read_offset >= client.read_buffer.size()) {
-    return;
-  }
-  const std::uint8_t type = client.read_buffer[client.read_offset];
+  while (client.read_offset < client.read_buffer.size()) {
+    const std::size_t frame_start = client.read_offset;
+    const std::uint8_t type = client.read_buffer[frame_start];
 
-  try {
-    switch (type) {
-    case '*': {
-      const RESP::RespValue command = RESP::decode_array(client);
-      executor::execute_command(client, command);
-      break;
-    }
-    default: {
+    if (type != '*') {
       std::clog << "Unknown RESP type: " << static_cast<unsigned int>(type)
                 << '\n';
       client.read_buffer.clear();
       client.read_offset = 0;
       RESP::encode_simple_error(client, "ERR unknown RESP type");
-      break;
+      return;
     }
+
+    try {
+      const RESP::RespValue command = RESP::decode_array(client);
+      executor::execute_command(client, command);
+    } catch (const RESP::IncompleteFrame &) {
+      client.read_offset = frame_start;
+      compact_read_buffer(client);
+      return;
+    } catch (const std::exception &error) {
+      std::clog << "RESP decode error: " << error.what() << '\n';
+      client.read_buffer.clear();
+      client.read_offset = 0;
+      RESP::encode_simple_error(client, std::string{"ERR Protocol error: "} +
+                                            error.what());
+      return;
     }
-  } catch (const std::exception &error) {
-    std::clog << "RESP decode error: " << error.what() << '\n';
-    client.read_buffer.clear();
-    client.read_offset = 0;
-    RESP::encode_simple_error(client, std::string{"ERR Protocol error: "} +
-                                          error.what());
   }
+
+  compact_read_buffer(client);
 }
 
 IoResult write_to_client(net::ClientObject &client) {

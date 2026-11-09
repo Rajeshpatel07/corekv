@@ -1,11 +1,25 @@
 #pragma once
 
 #include "net/socket.h"
+#include <exception>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <variant>
 
 namespace corekv::RESP {
+
+class IncompleteFrame : public std::exception {
+public:
+  [[nodiscard]] const char *what() const noexcept override {
+    return "incomplete RESP frame";
+  }
+};
+
+class ProtocolError : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
 
 struct RespValue;
 
