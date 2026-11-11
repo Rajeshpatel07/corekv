@@ -58,7 +58,7 @@ std::string decode_simple_string(net::ClientObject &client) {
 }
 
 // Handle RESP integer
-int decode_integer(net::ClientObject &client) {
+int64_t decode_integer(net::ClientObject &client) {
 
   client.read_offset += 1;
   if (client.read_offset >= client.read_buffer.size()) {
@@ -94,8 +94,8 @@ int decode_integer(net::ClientObject &client) {
 
   client.read_offset += 2;
 
-  int response =
-      parse_number<int>(payload, "RESP integer is not a valid number");
+  int64_t response =
+      parse_number<int64_t>(payload, "RESP integer is not a valid number");
 
   if (is_negative) {
     response *= -1;
@@ -155,50 +155,6 @@ std::string decode_bulk_string(net::ClientObject &client) {
   return response;
 }
 
-int64_t decode_big_numbers(net::ClientObject &client) {
-  client.read_offset += 1;
-  if (client.read_offset >= client.read_buffer.size()) {
-    throw IncompleteFrame{};
-  }
-
-  bool is_negative = client.read_buffer[client.read_offset] == '-';
-  if (is_negative) {
-    client.read_offset += 1;
-    if (client.read_offset >= client.read_buffer.size()) {
-      throw IncompleteFrame{};
-    }
-  }
-
-  size_t crlf_pos = std::string::npos;
-  for (size_t i{client.read_offset}; i + 1 < client.read_buffer.size(); ++i) {
-    if (client.read_buffer[i] == '\r' && client.read_buffer[i + 1] == '\n') {
-      crlf_pos = i;
-      break;
-    }
-  }
-
-  if (crlf_pos == std::string::npos) {
-    throw IncompleteFrame{};
-  }
-
-  size_t num_len = crlf_pos - client.read_offset;
-
-  std::string num(num_len, '\0');
-  parser::read_from_buffer(client.read_buffer,
-                           reinterpret_cast<uint8_t *>(num.data()), num_len,
-                           client.read_offset);
-
-  client.read_offset += 2;
-
-  int64_t response =
-      parse_number<int64_t>(num, "RESP big number is not a valid number");
-  if (is_negative) {
-    response *= -1;
-  }
-
-  return response;
-}
-
 RespValue decode_array(net::ClientObject &client) {
   client.read_offset += 1; // Skip '*'
   if (client.read_offset >= client.read_buffer.size()) {
@@ -254,9 +210,6 @@ RespValue decode_array(net::ClientObject &client) {
     case ':':
       element.data = decode_integer(client);
       break;
-    case '(':
-      element.data = decode_big_numbers(client);
-      break;
     case '*': {
       RespValue nested_arr = decode_array(client);
       element.data =
@@ -295,12 +248,6 @@ void encode_null_bulk_string(net::ClientObject &client) {
 
 void encode_integer(net::ClientObject &client, int32_t num) {
   std::string str{":" + std::to_string(num) + "\r\n"};
-  parser::append_to_buffer(reinterpret_cast<uint8_t *>(str.data()),
-                           client.write_buffer, str.size());
-}
-
-void encode_big_number(net::ClientObject &client, int64_t num) {
-  std::string str{"(" + std::to_string(num) + "\r\n"};
   parser::append_to_buffer(reinterpret_cast<uint8_t *>(str.data()),
                            client.write_buffer, str.size());
 }

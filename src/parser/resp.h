@@ -43,8 +43,7 @@ struct RespValue {
 
 std::string decode_simple_string(net::ClientObject &client);
 std::string decode_bulk_string(net::ClientObject &client);
-int decode_integer(net::ClientObject &client);
-int64_t decode_big_numbers(net::ClientObject &client);
+int64_t decode_integer(net::ClientObject &client);
 RespValue decode_array(net::ClientObject &client);
 
 // WARN: Need performance Improvements
@@ -52,7 +51,6 @@ void encode_simple_string(net::ClientObject &client, const std::string &data);
 void encode_bulk_string(net::ClientObject &client, const std::string &data);
 void encode_null_bulk_string(net::ClientObject &client);
 void encode_integer(net::ClientObject &client, int32_t num);
-void encode_big_number(net::ClientObject &client, int64_t num);
 void encode_simple_error(net::ClientObject &client, const std::string &message);
 void encode_bulk_error(net::ClientObject &client, const std::string &message);
 
