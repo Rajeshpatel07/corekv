@@ -1,5 +1,6 @@
 #include "command/executor.h"
 
+#include "common/common.h"
 #include "db/db.h"
 #include "db/hashtable.h"
 #include "net/socket.h"
@@ -25,8 +26,8 @@ namespace {
 }
 
 [[nodiscard]] std::uint64_t hash_key(const std::string &key) {
-  return db::HashMap::hash(reinterpret_cast<const std::uint8_t *>(key.data()),
-                           key.size());
+  return fnv1a_hash(reinterpret_cast<const std::uint8_t *>(key.data()),
+                    key.size());
 }
 
 [[nodiscard]] db::Entry *find_entry(const std::string &key) {
@@ -34,7 +35,7 @@ namespace {
   probe.key = key;
   probe.node.h_code = hash_key(key);
 
-  db::HashNode *node = db::database.hash_map.lookup(&probe.node);
+  db::HashNode *node = db::database.lookup(&probe.node);
   if (node == nullptr) {
     return nullptr;
   }
@@ -90,7 +91,7 @@ void handle_set(net::ClientObject &client, RespArray &args) {
     new_entry->key = key;
     new_entry->val = std::move(args[2]);
     new_entry->node.h_code = hash_key(key);
-    db::database.hash_map.insert(&new_entry->node);
+    db::database.insert(&new_entry->node);
     std::ignore = new_entry.release();
   }
 
@@ -113,7 +114,7 @@ void handle_del(net::ClientObject &client, const RespArray &args) {
     return;
   }
 
-  if (db::database.hash_map.remove(&entry->node) == nullptr) {
+  if (db::database.remove(&entry->node) == nullptr) {
     RESP::encode_simple_error(client, "ERR failed to delete key");
     return;
   }

@@ -14,8 +14,6 @@ namespace corekv::db {
 
 // NOTE: Move all of these into a constants.h file for single place to modify
 // everything.
-constexpr uint64_t kFnvPrime64 = 1099511628211ULL;
-constexpr uint64_t kFnvOffsetBasis64 = 14695981039346656037ULL;
 constexpr size_t kMaxLoadFactor = 8;
 constexpr size_t kRehashingWork = 128;
 
@@ -52,16 +50,6 @@ public:
 };
 
 class HashMap {
-private:
-  HashTable newer_{};
-  HashTable older_{};
-  uint64_t migration_pos{0};
-
-  static bool match_keys(HashNode *left, HashNode *right);
-  void trigger_rehash();
-  // Move data from one HashTable to another
-  void rehash();
-
 public:
   HashMap() = default;
   HashMap(const HashMap &) = delete;
@@ -72,12 +60,20 @@ public:
 
   [[nodiscard]] uint64_t size() const noexcept;
 
-  // Hash keys using FVN-1a algorithm
-  [[nodiscard]] static uint64_t hash(const uint8_t *data, size_t len);
   [[nodiscard]] HashNode *lookup(HashNode *node);
   void insert(HashNode *node);
   // It's the caller responsibility to delete the memory
   [[nodiscard]] HashNode *remove(HashNode *node);
+
+private:
+  HashTable newer_{};
+  HashTable older_{};
+  uint64_t migration_pos{0};
+
+  static bool match_keys(HashNode *left, HashNode *right);
+  void trigger_rehash();
+  // Move data from one HashTable to another
+  void rehash();
 };
 
 } // namespace corekv::db

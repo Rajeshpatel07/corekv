@@ -139,17 +139,6 @@ void HashMap::rehash() {
   return newer_.size_ + older_.size_;
 }
 
-[[nodiscard]] uint64_t HashMap::hash(const uint8_t *data, size_t len) {
-  uint64_t h = kFnvOffsetBasis64;
-  const auto *bytes = static_cast<const unsigned char *>(data);
-
-  for (size_t i = 0; i < len; ++i) {
-    h ^= bytes[i];
-    h *= kFnvPrime64;
-  }
-  return h;
-}
-
 [[nodiscard]] HashNode *HashMap::lookup(HashNode *node) {
   HashNode **from{newer_.lookup(node, match_keys)};
   if (!from) {
