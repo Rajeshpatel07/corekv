@@ -1,4 +1,5 @@
 #include "resp.h"
+#include "common/common.h"
 #include "net/socket.h"
 #include "parser/parser.h"
 #include <charconv>
@@ -65,8 +66,8 @@ int64_t decode_integer(net::ClientObject &client) {
     throw IncompleteFrame{};
   }
 
-  bool is_negative{client.read_buffer[client.read_offset] == '-'};
-  if (is_negative) {
+  bool is_positive{client.read_buffer[client.read_offset] == '+'};
+  if (is_positive) {
     client.read_offset += 1;
     if (client.read_offset >= client.read_buffer.size()) {
       throw IncompleteFrame{};
@@ -96,10 +97,6 @@ int64_t decode_integer(net::ClientObject &client) {
 
   int64_t response =
       parse_number<int64_t>(payload, "RESP integer is not a valid number");
-
-  if (is_negative) {
-    response *= -1;
-  }
 
   return response;
 }
@@ -228,6 +225,34 @@ RespValue decode_array(net::ClientObject &client) {
   return result;
 }
 
+void encode_handler(net::ClientObject &client, const RespValue &value) {
+
+  if (value.is_string()) {
+    encode_bulk_string(client, value.get_string());
+  } else if (value.is_int()) {
+    encode_integer(client, value.get_int());
+  } else {
+    encode_array(client, value.get_array());
+  }
+}
+
+void encode_array(net::ClientObject &client, const RespArray &value) {
+
+  std::string prefix{"*" + std::to_string(value.size()) + "\r\n"};
+  parser::append_to_buffer(reinterpret_cast<uint8_t *>(prefix.data()),
+                           client.write_buffer, prefix.size());
+
+  for (auto &it : value) {
+    if (it.is_int()) {
+      encode_integer(client, it.get_int());
+    } else if (it.is_string()) {
+      encode_bulk_string(client, it.get_string());
+    } else if (it.is_array()) {
+      encode_array(client, it.get_array());
+    }
+  }
+}
+
 void encode_simple_string(net::ClientObject &client, const std::string &data) {
   std::string str{"+" + data + "\r\n"};
   parser::append_to_buffer(reinterpret_cast<uint8_t *>(str.data()),
@@ -246,7 +271,7 @@ void encode_null_bulk_string(net::ClientObject &client) {
                            client.write_buffer, str.size());
 }
 
-void encode_integer(net::ClientObject &client, int32_t num) {
+void encode_integer(net::ClientObject &client, int64_t num) {
   std::string str{":" + std::to_string(num) + "\r\n"};
   parser::append_to_buffer(reinterpret_cast<uint8_t *>(str.data()),
                            client.write_buffer, str.size());

@@ -52,13 +52,11 @@ void handle_ping(net::ClientObject &client) {
   RESP::encode_simple_string(client, "pong");
 }
 
-void handle_get(net::ClientObject &client, const RESP::RespArray &args) {
+void handle_get(net::ClientObject &client, const RespArray &args) {
   if (args.size() != 2) {
     encode_wrong_arity(client, "get");
     return;
   }
-  // TODO: need to implement this here
-  // Revisit this check when hashtable values become RESP variants.
   if (!args[1].is_string()) {
     RESP::encode_simple_error(client, "ERR key must be a string");
     return;
@@ -70,30 +68,27 @@ void handle_get(net::ClientObject &client, const RESP::RespArray &args) {
     return;
   }
 
-  RESP::encode_bulk_string(client, entry->val);
+  RESP::encode_handler(client, entry->val);
 }
 
-void handle_set(net::ClientObject &client, const RESP::RespArray &args) {
+void handle_set(net::ClientObject &client, RespArray &args) {
   if (args.size() != 3) {
     encode_wrong_arity(client, "set");
     return;
   }
-  // TODO: need to implement this here
-  // Revisit these checks when hashtable values become RESP variants.
-  if (!args[1].is_string() || !args[2].is_string()) {
-    RESP::encode_simple_error(client, "ERR key and value must be strings");
+  if (!args[1].is_string()) {
+    RESP::encode_simple_error(client, "ERR key must be a string");
     return;
   }
 
   const std::string &key = args[1].get_string();
-  const std::string &value = args[2].get_string();
 
   if (db::Entry *entry = find_entry(key)) {
-    entry->val = value;
+    entry->val = std::move(args[2]);
   } else {
     auto new_entry = std::make_unique<db::Entry>();
     new_entry->key = key;
-    new_entry->val = value;
+    new_entry->val = std::move(args[2]);
     new_entry->node.h_code = hash_key(key);
     db::database.hash_map.insert(&new_entry->node);
     std::ignore = new_entry.release();
@@ -102,13 +97,11 @@ void handle_set(net::ClientObject &client, const RESP::RespArray &args) {
   RESP::encode_simple_string(client, "OK");
 }
 
-void handle_del(net::ClientObject &client, const RESP::RespArray &args) {
+void handle_del(net::ClientObject &client, const RespArray &args) {
   if (args.size() != 2) {
     encode_wrong_arity(client, "del");
     return;
   }
-  // TODO: need to implement this here
-  // Revisit this check when hashtable values become RESP variants.
   if (!args[1].is_string()) {
     RESP::encode_simple_error(client, "ERR key must be a string");
     return;
@@ -131,14 +124,13 @@ void handle_del(net::ClientObject &client, const RESP::RespArray &args) {
 
 } // namespace
 
-void execute_command(net::ClientObject &client,
-                     const RESP::RespValue &command) {
+void execute_command(net::ClientObject &client, RespValue &command) {
   if (!command.is_array()) {
     RESP::encode_simple_error(client, "ERR command must be an array");
     return;
   }
 
-  const RESP::RespArray &args = command.get_array();
+  RespArray &args = command.get_array();
   if (args.empty()) {
     RESP::encode_simple_error(client, "ERR empty command");
     return;

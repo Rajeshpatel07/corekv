@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/common.h"
 #include "net/socket.h"
 #include <exception>
 #include <memory>
@@ -21,36 +22,18 @@ public:
   using std::runtime_error::runtime_error;
 };
 
-struct RespValue;
-
-using RespArray = std::vector<RespValue>;
-
-struct RespValue {
-  std::variant<std::string, int64_t, std::unique_ptr<RespArray>> data;
-
-  bool is_string() const { return std::holds_alternative<std::string>(data); }
-  bool is_int() const { return std::holds_alternative<int64_t>(data); }
-  bool is_array() const {
-    return std::holds_alternative<std::unique_ptr<RespArray>>(data);
-  }
-
-  const std::string &get_string() const { return std::get<std::string>(data); }
-  int64_t get_int() const { return std::get<int64_t>(data); }
-  const RespArray &get_array() const {
-    return *std::get<std::unique_ptr<RespArray>>(data);
-  }
-};
-
 std::string decode_simple_string(net::ClientObject &client);
 std::string decode_bulk_string(net::ClientObject &client);
 int64_t decode_integer(net::ClientObject &client);
 RespValue decode_array(net::ClientObject &client);
 
 // WARN: Need performance Improvements
+void encode_handler(net::ClientObject &client, const RespValue &value);
+void encode_array(net::ClientObject &client, const RespArray &value);
 void encode_simple_string(net::ClientObject &client, const std::string &data);
 void encode_bulk_string(net::ClientObject &client, const std::string &data);
 void encode_null_bulk_string(net::ClientObject &client);
-void encode_integer(net::ClientObject &client, int32_t num);
+void encode_integer(net::ClientObject &client, int64_t num);
 void encode_simple_error(net::ClientObject &client, const std::string &message);
 void encode_bulk_error(net::ClientObject &client, const std::string &message);
 
