@@ -26,7 +26,7 @@ namespace {
 }
 
 [[nodiscard]] std::uint64_t hash_key(const std::string &key) {
-  return fnv1a_hash(reinterpret_cast<const std::uint8_t *>(key.data()),
+  return db::fnv1a_hash(reinterpret_cast<const std::uint8_t *>(key.data()),
                     key.size());
 }
 

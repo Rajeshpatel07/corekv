@@ -1,5 +1,4 @@
 #include "net/socket.h"
-
 #include <cerrno>
 #include <fcntl.h>
 #include <netinet/in.h>

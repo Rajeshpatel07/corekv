@@ -1,7 +1,5 @@
 #include "server/server.h"
-
 #include "parser/parser.h"
-
 #include <array>
 #include <cstddef>
 #include <cstdint>

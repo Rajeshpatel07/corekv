@@ -1,9 +1,7 @@
 #include "parser/parser.h"
-
 #include "command/executor.h"
 #include "net/socket.h"
 #include "parser/resp.h"
-
 #include <array>
 #include <cerrno>
 #include <cstddef>

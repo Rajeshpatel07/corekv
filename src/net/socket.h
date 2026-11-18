@@ -40,11 +40,11 @@ struct ClientObject {
   ClientObject(ClientObject &&) = delete;
   ClientObject &operator=(ClientObject &&) = delete;
 
-  Socket socket;
   std::vector<std::uint8_t> read_buffer;
   std::vector<std::uint8_t> write_buffer;
   std::size_t read_offset{0};
   std::size_t write_offset{0};
+  Socket socket;
 };
 
 class TcpListener {
