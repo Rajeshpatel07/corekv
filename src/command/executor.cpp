@@ -210,6 +210,41 @@ void handle_incr(net::ClientObject &client, const RESP::RespArray &args) {
   }
 }
 
+void handle_decr(net::ClientObject &client, const RESP::RespArray &args) {
+  if (args.size() != 2) {
+    encode_wrong_arity(client, "decr");
+    return;
+  }
+
+  if (!args[1].is_string()) {
+    RESP::encode_simple_error(client, "ERR key must be a string");
+    return;
+  }
+
+  const std::string &key = args[1].get_string();
+  db::Entry *entry = find_entry(key);
+  if (entry == nullptr) {
+    insert_entry(key, "-1");
+    RESP::encode_integer(client, -1);
+    return;
+  }
+
+  try {
+    const int64_t next = increment_int64(entry->val, -1);
+    entry->val = std::to_string(next);
+    RESP::encode_integer(client, next);
+  } catch (const std::invalid_argument &) {
+    RESP::encode_simple_error(client,
+                              "ERR value is not an integer or out of range");
+  } catch (const std::out_of_range &) {
+    RESP::encode_simple_error(client,
+                              "ERR value is not an integer or out of range");
+  } catch (const std::overflow_error &) {
+    RESP::encode_simple_error(client,
+                              "ERR increment or decrement would overflow");
+  }
+}
+
 } // namespace
 
 void execute_command(net::ClientObject &client, RESP::RespValue &command) {
@@ -239,6 +274,8 @@ void execute_command(net::ClientObject &client, RESP::RespValue &command) {
     handle_del(client, args);
   } else if (equals_ignore_case(cmd, "incr")) {
     handle_incr(client, args);
+  } else if (equals_ignore_case(cmd, "decr")) {
+    handle_decr(client, args);
   } else {
     RESP::encode_simple_error(client, "ERR unknown command '" + cmd + "'");
   }
