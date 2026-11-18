@@ -1,6 +1,5 @@
 #pragma once
 
-#include "common/common.h"
 #include "net/socket.h"
 #include <exception>
 #include <memory>
@@ -9,6 +8,34 @@
 #include <variant>
 
 namespace corekv::RESP {
+
+struct RespValue;
+
+using RespArray = std::vector<RespValue>;
+
+struct RespValue {
+  RespValue() = default;
+  ~RespValue() = default;
+  RespValue(const RespValue &) = delete;
+  RespValue &operator=(const RespValue &) = delete;
+  RespValue(RespValue &&) = default;
+  RespValue &operator=(RespValue &&) = default;
+
+  std::variant<std::string, int64_t, std::unique_ptr<RespArray>> data;
+
+  bool is_string() const { return std::holds_alternative<std::string>(data); }
+  bool is_int() const { return std::holds_alternative<int64_t>(data); }
+  bool is_array() const {
+    return std::holds_alternative<std::unique_ptr<RespArray>>(data);
+  }
+
+  const std::string &get_string() const { return std::get<std::string>(data); }
+  int64_t get_int() const { return std::get<int64_t>(data); }
+  RespArray &get_array() { return *std::get<std::unique_ptr<RespArray>>(data); }
+  const RespArray &get_array() const {
+    return *std::get<std::unique_ptr<RespArray>>(data);
+  }
+};
 
 class IncompleteFrame : public std::exception {
 public:
@@ -28,7 +55,6 @@ int64_t decode_integer(net::ClientObject &client);
 RespValue decode_array(net::ClientObject &client);
 
 // WARN: Need performance Improvements
-void encode_handler(net::ClientObject &client, const RespValue &value);
 void encode_array(net::ClientObject &client, const RespArray &value);
 void encode_simple_string(net::ClientObject &client, const std::string &data);
 void encode_bulk_string(net::ClientObject &client, const std::string &data);

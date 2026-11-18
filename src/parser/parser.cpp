@@ -107,7 +107,7 @@ void parser_handler(net::ClientObject &client) {
     }
 
     try {
-      RespValue command = RESP::decode_array(client);
+      RESP::RespValue command = RESP::decode_array(client);
       executor::execute_command(client, command);
     } catch (const RESP::IncompleteFrame &) {
       client.read_offset = frame_start;

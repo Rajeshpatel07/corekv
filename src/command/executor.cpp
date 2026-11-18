@@ -1,6 +1,5 @@
 #include "command/executor.h"
 
-#include "common/common.h"
 #include "db/db.h"
 #include "db/hashtable.h"
 #include "net/socket.h"
@@ -27,7 +26,7 @@ namespace {
 
 [[nodiscard]] std::uint64_t hash_key(const std::string &key) {
   return db::fnv1a_hash(reinterpret_cast<const std::uint8_t *>(key.data()),
-                    key.size());
+                        key.size());
 }
 
 [[nodiscard]] db::Entry *find_entry(const std::string &key) {
@@ -53,7 +52,7 @@ void handle_ping(net::ClientObject &client) {
   RESP::encode_simple_string(client, "pong");
 }
 
-void handle_get(net::ClientObject &client, const RespArray &args) {
+void handle_get(net::ClientObject &client, const RESP::RespArray &args) {
   if (args.size() != 2) {
     encode_wrong_arity(client, "get");
     return;
@@ -69,27 +68,28 @@ void handle_get(net::ClientObject &client, const RespArray &args) {
     return;
   }
 
-  RESP::encode_handler(client, entry->val);
+  RESP::encode_bulk_string(client, entry->val);
 }
 
-void handle_set(net::ClientObject &client, RespArray &args) {
+void handle_set(net::ClientObject &client, RESP::RespArray &args) {
   if (args.size() != 3) {
     encode_wrong_arity(client, "set");
     return;
   }
-  if (!args[1].is_string()) {
-    RESP::encode_simple_error(client, "ERR key must be a string");
+  if (!args[1].is_string() || !args[2].is_string()) {
+    RESP::encode_simple_error(client, "ERR key and val must be strings");
     return;
   }
 
   const std::string &key = args[1].get_string();
+  const std::string &val = args[2].get_string();
 
   if (db::Entry *entry = find_entry(key)) {
-    entry->val = std::move(args[2]);
+    entry->val = std::move(val);
   } else {
     auto new_entry = std::make_unique<db::Entry>();
     new_entry->key = key;
-    new_entry->val = std::move(args[2]);
+    new_entry->val = std::move(val);
     new_entry->node.h_code = hash_key(key);
     db::database.insert(&new_entry->node);
     std::ignore = new_entry.release();
@@ -98,7 +98,7 @@ void handle_set(net::ClientObject &client, RespArray &args) {
   RESP::encode_simple_string(client, "OK");
 }
 
-void handle_del(net::ClientObject &client, const RespArray &args) {
+void handle_del(net::ClientObject &client, const RESP::RespArray &args) {
   if (args.size() != 2) {
     encode_wrong_arity(client, "del");
     return;
@@ -125,13 +125,13 @@ void handle_del(net::ClientObject &client, const RespArray &args) {
 
 } // namespace
 
-void execute_command(net::ClientObject &client, RespValue &command) {
+void execute_command(net::ClientObject &client, RESP::RespValue &command) {
   if (!command.is_array()) {
     RESP::encode_simple_error(client, "ERR command must be an array");
     return;
   }
 
-  RespArray &args = command.get_array();
+  RESP::RespArray &args = command.get_array();
   if (args.empty()) {
     RESP::encode_simple_error(client, "ERR empty command");
     return;

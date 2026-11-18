@@ -1,6 +1,5 @@
 #pragma once
 
-#include "common/common.h"
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -25,7 +24,7 @@ struct HashNode {
 struct Entry {
   HashNode node;
   std::string key;
-  RespValue val;
+  std::string val;
 };
 
 class HashTable {
