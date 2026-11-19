@@ -144,24 +144,28 @@ void handle_set(net::ClientObject &client, const RESP::DataBuffer &args) {
 }
 
 void handle_del(net::ClientObject &client, const RESP::DataBuffer &args) {
-  if (args.size() != 2) {
+  if (args.size() < 2) {
     encode_wrong_arity(client, "del");
     return;
   }
 
-  db::Entry *entry = find_entry(args[1]);
-  if (entry == nullptr) {
-    RESP::encode_integer(client, 0);
-    return;
+  int64_t del_cnt{0};
+  for (size_t i = 1; i < args.size(); i++) {
+    db::Entry *entry = find_entry(args[i]);
+    if (entry == nullptr) {
+      continue;
+    }
+
+    if (db::database.remove(&entry->node) == nullptr) {
+      RESP::encode_simple_error(client, "ERR failed to delete key");
+      return;
+    }
+
+    delete entry;
+    del_cnt++;
   }
 
-  if (db::database.remove(&entry->node) == nullptr) {
-    RESP::encode_simple_error(client, "ERR failed to delete key");
-    return;
-  }
-
-  delete entry;
-  RESP::encode_integer(client, 1);
+  RESP::encode_integer(client, del_cnt);
 }
 
 void handle_incr(net::ClientObject &client, const RESP::DataBuffer &args) {
