@@ -109,17 +109,13 @@ void handle_ping(net::ClientObject &client) {
   RESP::encode_simple_string(client, "pong");
 }
 
-void handle_get(net::ClientObject &client, const RESP::RespArray &args) {
+void handle_get(net::ClientObject &client, const RESP::DataBuffer &args) {
   if (args.size() != 2) {
     encode_wrong_arity(client, "get");
     return;
   }
-  if (!args[1].is_string()) {
-    RESP::encode_simple_error(client, "ERR key must be a string");
-    return;
-  }
 
-  const db::Entry *entry = find_entry(args[1].get_string());
+  const db::Entry *entry = find_entry(args[1]);
   if (entry == nullptr) {
     RESP::encode_null_bulk_string(client);
     return;
@@ -128,18 +124,14 @@ void handle_get(net::ClientObject &client, const RESP::RespArray &args) {
   RESP::encode_bulk_string(client, entry->val);
 }
 
-void handle_set(net::ClientObject &client, RESP::RespArray &args) {
+void handle_set(net::ClientObject &client, const RESP::DataBuffer &args) {
   if (args.size() != 3) {
     encode_wrong_arity(client, "set");
     return;
   }
-  if (!args[1].is_string() || !args[2].is_string()) {
-    RESP::encode_simple_error(client, "ERR key and val must be strings");
-    return;
-  }
 
-  const std::string &key = args[1].get_string();
-  const std::string &val = args[2].get_string();
+  const std::string &key = args[1];
+  const std::string &val = args[2];
 
   if (db::Entry *entry = find_entry(key)) {
     entry->val = val;
@@ -150,17 +142,13 @@ void handle_set(net::ClientObject &client, RESP::RespArray &args) {
   RESP::encode_simple_string(client, "OK");
 }
 
-void handle_del(net::ClientObject &client, const RESP::RespArray &args) {
+void handle_del(net::ClientObject &client, const RESP::DataBuffer &args) {
   if (args.size() != 2) {
     encode_wrong_arity(client, "del");
     return;
   }
-  if (!args[1].is_string()) {
-    RESP::encode_simple_error(client, "ERR key must be a string");
-    return;
-  }
 
-  db::Entry *entry = find_entry(args[1].get_string());
+  db::Entry *entry = find_entry(args[1]);
   if (entry == nullptr) {
     RESP::encode_integer(client, 0);
     return;
@@ -175,18 +163,13 @@ void handle_del(net::ClientObject &client, const RESP::RespArray &args) {
   RESP::encode_integer(client, 1);
 }
 
-void handle_incr(net::ClientObject &client, const RESP::RespArray &args) {
+void handle_incr(net::ClientObject &client, const RESP::DataBuffer &args) {
   if (args.size() != 2) {
     encode_wrong_arity(client, "incr");
     return;
   }
 
-  if (!args[1].is_string()) {
-    RESP::encode_simple_error(client, "ERR key must be a string");
-    return;
-  }
-
-  const std::string &key = args[1].get_string();
+  const std::string &key = args[1];
   db::Entry *entry = find_entry(key);
   if (entry == nullptr) {
     insert_entry(key, "1");
@@ -210,18 +193,13 @@ void handle_incr(net::ClientObject &client, const RESP::RespArray &args) {
   }
 }
 
-void handle_decr(net::ClientObject &client, const RESP::RespArray &args) {
+void handle_decr(net::ClientObject &client, const RESP::DataBuffer &args) {
   if (args.size() != 2) {
     encode_wrong_arity(client, "decr");
     return;
   }
 
-  if (!args[1].is_string()) {
-    RESP::encode_simple_error(client, "ERR key must be a string");
-    return;
-  }
-
-  const std::string &key = args[1].get_string();
+  const std::string &key = args[1];
   db::Entry *entry = find_entry(key);
   if (entry == nullptr) {
     insert_entry(key, "-1");
@@ -247,23 +225,13 @@ void handle_decr(net::ClientObject &client, const RESP::RespArray &args) {
 
 } // namespace
 
-void execute_command(net::ClientObject &client, RESP::RespValue &command) {
-  if (!command.is_array()) {
-    RESP::encode_simple_error(client, "ERR command must be an array");
-    return;
-  }
-
-  RESP::RespArray &args = command.get_array();
+void execute_command(net::ClientObject &client, const RESP::DataBuffer &args) {
   if (args.empty()) {
     RESP::encode_simple_error(client, "ERR empty command");
     return;
   }
-  if (!args[0].is_string()) {
-    RESP::encode_simple_error(client, "ERR command name must be a string");
-    return;
-  }
 
-  const std::string &cmd = args[0].get_string();
+  const std::string &cmd = args[0];
   if (equals_ignore_case(cmd, "ping")) {
     handle_ping(client);
   } else if (equals_ignore_case(cmd, "get")) {

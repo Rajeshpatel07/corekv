@@ -25,81 +25,6 @@ template <typename Integer>
 
 } // namespace
 
-// Handle RESP simple string
-std::string decode_simple_string(net::ClientObject &client) {
-  client.read_offset += 1;
-  if (client.read_offset >= client.read_buffer.size()) {
-    throw IncompleteFrame{};
-  }
-
-  size_t crlf_pos = std::string::npos;
-  for (size_t i = client.read_offset; i + 1 < client.read_buffer.size(); ++i) {
-    if (client.read_buffer[i] == '\r' && client.read_buffer[i + 1] == '\n') {
-      crlf_pos = i;
-      break;
-    }
-  }
-
-  if (crlf_pos == std::string::npos) {
-    throw IncompleteFrame{};
-  }
-
-  size_t data_len = crlf_pos - (client.read_offset);
-
-  std::string response(data_len, '\0');
-
-  parser::read_from_buffer(client.read_buffer,
-                           reinterpret_cast<uint8_t *>(response.data()),
-                           data_len, client.read_offset);
-
-  client.read_offset += 2;
-
-  return response;
-}
-
-// Handle RESP integer
-int64_t decode_integer(net::ClientObject &client) {
-
-  client.read_offset += 1;
-  if (client.read_offset >= client.read_buffer.size()) {
-    throw IncompleteFrame{};
-  }
-
-  bool is_positive{client.read_buffer[client.read_offset] == '+'};
-  if (is_positive) {
-    client.read_offset += 1;
-    if (client.read_offset >= client.read_buffer.size()) {
-      throw IncompleteFrame{};
-    }
-  }
-
-  size_t crlf_pos = std::string::npos;
-
-  for (size_t i = client.read_offset; i + 1 < client.read_buffer.size(); ++i) {
-    if (client.read_buffer[i] == '\r' && client.read_buffer[i + 1] == '\n') {
-      crlf_pos = i;
-      break;
-    }
-  }
-
-  if (crlf_pos == std::string::npos) {
-    throw IncompleteFrame{};
-  }
-
-  size_t len = crlf_pos - client.read_offset;
-  std::string payload(len, '\0');
-  parser::read_from_buffer(client.read_buffer,
-                           reinterpret_cast<uint8_t *>(payload.data()), len,
-                           client.read_offset);
-
-  client.read_offset += 2;
-
-  int64_t response =
-      parse_number<int64_t>(payload, "RESP integer is not a valid number");
-
-  return response;
-}
-
 // Handle RESP bulk string
 std::string decode_bulk_string(net::ClientObject &client) {
 
@@ -151,7 +76,7 @@ std::string decode_bulk_string(net::ClientObject &client) {
   return response;
 }
 
-RespValue decode_array(net::ClientObject &client) {
+DataBuffer decode_array(net::ClientObject &client) {
   client.read_offset += 1; // Skip '*'
   if (client.read_offset >= client.read_buffer.size()) {
     throw IncompleteFrame{};
@@ -185,8 +110,8 @@ RespValue decode_array(net::ClientObject &client) {
   }
   const size_t array_len = static_cast<size_t>(length);
 
-  auto arr = std::make_unique<RespArray>();
-  arr->reserve(array_len);
+  DataBuffer arr;
+  arr.reserve(array_len);
 
   for (size_t i{0}; i < array_len; ++i) {
     if (client.read_offset >= client.read_buffer.size()) {
@@ -194,61 +119,25 @@ RespValue decode_array(net::ClientObject &client) {
     }
 
     const uint8_t type = client.read_buffer[client.read_offset];
-    RespValue element;
-
-    switch (type) {
-    case '+':
-      element.data = decode_simple_string(client);
-      break;
-    case '$':
-      element.data = decode_bulk_string(client);
-      break;
-    case ':':
-      element.data = decode_integer(client);
-      break;
-    case '*': {
-      RespValue nested_arr = decode_array(client);
-      element.data =
-          std::move(std::get<std::unique_ptr<RespArray>>(nested_arr.data));
-      break;
-    }
-    default:
-      throw ProtocolError("RESP array contains an unknown element type");
+    if (type != '$') {
+      throw ProtocolError{std::string{"expected '$', got '"} +
+                          static_cast<char>(type) + "'"};
     }
 
-    arr->push_back(std::move(element));
+    arr.emplace_back(decode_bulk_string(client));
   }
 
-  RespValue result;
-  result.data = std::move(arr);
-  return result;
+  return arr;
 }
 
-void encode_handler(net::ClientObject &client, const RespValue &value) {
+void encode_array(net::ClientObject &client, const DataBuffer &values) {
 
-  if (value.is_string()) {
-    encode_bulk_string(client, value.get_string());
-  } else if (value.is_int()) {
-    encode_integer(client, value.get_int());
-  } else {
-    encode_array(client, value.get_array());
-  }
-}
-
-void encode_array(net::ClientObject &client, const RespArray &value) {
-
-  std::string prefix{"*" + std::to_string(value.size()) + "\r\n"};
+  std::string prefix{"*" + std::to_string(values.size()) + "\r\n"};
   parser::append_to_buffer(reinterpret_cast<uint8_t *>(prefix.data()),
                            client.write_buffer, prefix.size());
 
-  for (auto &it : value) {
-    if (it.is_int()) {
-      encode_integer(client, it.get_int());
-    } else if (it.is_string()) {
-      encode_bulk_string(client, it.get_string());
-    } else if (it.is_array()) {
-      encode_array(client, it.get_array());
-    }
+  for (const auto &value : values) {
+    encode_bulk_string(client, value);
   }
 }
 
