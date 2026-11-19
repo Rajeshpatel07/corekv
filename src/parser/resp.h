@@ -3,6 +3,7 @@
 #include "net/socket.h"
 #include <cstdint>
 #include <exception>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -27,7 +28,8 @@ std::string decode_bulk_string(net::ClientObject &client);
 DataBuffer decode_array(net::ClientObject &client);
 
 // WARN: Need performance Improvements
-void encode_array(net::ClientObject &client, const DataBuffer &value);
+void encode_array(net::ClientObject &client,
+                  const std::vector<std::optional<std::string>> &value);
 void encode_simple_string(net::ClientObject &client, const std::string &data);
 void encode_bulk_string(net::ClientObject &client, const std::string &data);
 void encode_null_bulk_string(net::ClientObject &client);

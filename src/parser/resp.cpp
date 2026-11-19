@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cstring>
 #include <netinet/in.h>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -130,14 +131,19 @@ DataBuffer decode_array(net::ClientObject &client) {
   return arr;
 }
 
-void encode_array(net::ClientObject &client, const DataBuffer &values) {
+void encode_array(net::ClientObject &client,
+                  const std::vector<std::optional<std::string>> &values) {
 
   std::string prefix{"*" + std::to_string(values.size()) + "\r\n"};
   parser::append_to_buffer(reinterpret_cast<uint8_t *>(prefix.data()),
                            client.write_buffer, prefix.size());
 
   for (const auto &value : values) {
-    encode_bulk_string(client, value);
+    if (value.has_value()) {
+      encode_bulk_string(client, value.value());
+    } else {
+      encode_null_bulk_string(client);
+    }
   }
 }
 

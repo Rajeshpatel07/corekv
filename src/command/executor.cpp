@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -223,6 +224,27 @@ void handle_decr(net::ClientObject &client, const RESP::DataBuffer &args) {
   }
 }
 
+void handle_mget(net::ClientObject &client, const RESP::DataBuffer &args) {
+  if (args.size() < 2) {
+    encode_wrong_arity(client, "mget");
+    return;
+  }
+
+  std::vector<std::optional<std::string>> values;
+  values.reserve(args.size() - 1);
+
+  for (size_t i = 1; i < args.size(); i++) {
+    const db::Entry *entry = find_entry(args[i]);
+    if (entry == nullptr) {
+      values.emplace_back(std::nullopt);
+    } else {
+      values.emplace_back(entry->val);
+    }
+  }
+
+  RESP::encode_array(client, values);
+}
+
 } // namespace
 
 void execute_command(net::ClientObject &client, const RESP::DataBuffer &args) {
@@ -244,6 +266,8 @@ void execute_command(net::ClientObject &client, const RESP::DataBuffer &args) {
     handle_incr(client, args);
   } else if (equals_ignore_case(cmd, "decr")) {
     handle_decr(client, args);
+  } else if (equals_ignore_case(cmd, "mget")) {
+    handle_mget(client, args);
   } else {
     RESP::encode_simple_error(client, "ERR unknown command '" + cmd + "'");
   }
