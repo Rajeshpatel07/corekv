@@ -107,7 +107,7 @@ void insert_entry(std::string_view key, std::string_view val) {
 }
 
 void handle_ping(net::ClientObject &client) {
-  RESP::encode_simple_string(client, "pong");
+  RESP::encode_simple_string(client, "PONG");
 }
 
 void handle_get(net::ClientObject &client, const RESP::DataBuffer &args) {
@@ -267,6 +267,52 @@ void handle_exists(net::ClientObject &client, const RESP::DataBuffer &args) {
   RESP::encode_integer(client, exist_cnt);
 }
 
+void handle_rename(net::ClientObject &client, const RESP::DataBuffer &args) {
+  if (args.size() != 3) {
+    encode_wrong_arity(client, "rename");
+    return;
+  }
+
+  const std::string &old_key = args[1];
+  const std::string &new_key = args[2];
+
+  db::Entry *entry = find_entry(old_key);
+  if (entry == nullptr) {
+    RESP::encode_simple_error(client, "ERR no such key");
+    return;
+  }
+
+  // If entry exist and keys are same
+  if (old_key == new_key) {
+    RESP::encode_simple_string(client, "OK");
+    return;
+  }
+
+  // check if there exist a entry with new_key
+  db::Entry *destination = find_entry(new_key);
+  if (destination != nullptr) {
+    if (db::database.remove(&destination->node) == nullptr) {
+      RESP::encode_simple_error(client, "ERR failed to rename key");
+      return;
+    }
+    delete destination;
+  }
+
+  // Detach the entry form bucket.
+  if (db::database.remove(&entry->node) == nullptr) {
+    RESP::encode_simple_error(client, "ERR failed to rename key");
+    return;
+  }
+
+  entry->key = new_key;
+  entry->node.h_code = hash_key(new_key);
+  
+  // Insert the entry into new bucket
+  db::database.insert(&entry->node);
+
+  RESP::encode_simple_string(client, "OK");
+}
+
 } // namespace
 
 void execute_command(net::ClientObject &client, const RESP::DataBuffer &args) {
@@ -292,6 +338,8 @@ void execute_command(net::ClientObject &client, const RESP::DataBuffer &args) {
     handle_mget(client, args);
   } else if (equals_ignore_case(cmd, "exists")) {
     handle_exists(client, args);
+  } else if (equals_ignore_case(cmd, "rename")) {
+    handle_rename(client, args);
   } else {
     RESP::encode_simple_error(client, "ERR unknown command '" + cmd + "'");
   }
