@@ -18,9 +18,11 @@ It is written from scratch in C++20 on top of `epoll`, with no external
 dependencies beyond the C++ standard library. The server is single threaded
 and fully event driven, so it never blocks on a client.
 
-> **Status:** work in progress. The networking, RESP parsing, pipelining, and
-> the sharded in-memory hash map are implemented. Persistence, expiration, and
-> the remaining Redis data structures are not — see [Roadmap](#roadmap).
+> **Status:** work in progress. Networking, RESP2 request parsing, pipelining,
+> the string command set (`PING`, `SET`, `MSET`, `GET`, `DEL`, `RENAME`,
+> `INCR`, `DECR`, `MGET`, `EXISTS`), and the sharded in-memory hash map are
+> implemented. Persistence, expiration, and the remaining Redis data types are
+> not — see [Roadmap](#roadmap).
 
 ---
 
@@ -73,7 +75,14 @@ Listens on TCP port **8080**.
 redis-cli -p 8080 ping
 redis-cli -p 8080 set greeting "hello"
 redis-cli -p 8080 get greeting
-redis-cli -p 8080 del greeting
+redis-cli -p 8080 mset first one second two
+redis-cli -p 8080 rename first renamed
+redis-cli -p 8080 mget renamed second missing
+redis-cli -p 8080 set counter 41
+redis-cli -p 8080 incr counter
+redis-cli -p 8080 exists greeting counter missing
+redis-cli -p 8080 mget greeting counter missing
+redis-cli -p 8080 del greeting counter missing renamed second
 ```
 
 A raw session works too. Keep the connection open long enough to read the
@@ -104,26 +113,38 @@ are executed and both replies are returned together.
 
 | Command | Reply | Notes |
 |---|---|---|
-| `PING` | `+pong` | Liveness check. |
-| `SET key value` | `+OK` | Value may be a bulk string, integer, or array. |
-| `GET key` | value or `$-1` | Returns the stored value with its original RESP type. |
-| `DEL key` | `:1` / `:0` | `:0` when the key does not exist. |
+| `PING` | `+PONG` | Liveness check. |
+| `SET key value` | `+OK` | Stores `value` as a string, replacing any existing value. |
+| `MSET key value [key value ...]` | `+OK` | Sets all key/value pairs; later duplicates overwrite earlier values. |
+| `GET key` | bulk string or `$-1` | Returns the stored value, or null when the key is absent. |
+| `DEL key [key ...]` | integer | Deletes every named key and returns how many were removed. |
+| `RENAME key newkey` | `+OK` | Renames a key; replaces `newkey` if it exists, or returns `ERR no such key` when the source is missing. |
+| `INCR key` | integer | Treats the value as a signed 64-bit integer and increments it; missing keys start at `1`. |
+| `DECR key` | integer | Treats the value as a signed 64-bit integer and decrements it; missing keys start at `-1`. |
+| `MGET key [key ...]` | array | Returns the value or null for each key, preserving argument order. |
+| `EXISTS key [key ...]` | integer | Counts the keys that exist; repeated keys are counted each time. |
 
 Command names are case-insensitive.
 
 ### Protocol notes
 
-CoreKV implements a subset of RESP2, so standard clients work, but a few
-details differ from Redis:
+CoreKV implements RESP2 requests as arrays of bulk strings. All keys and values
+are opaque byte strings.
 
-- `PING` replies `+pong` (lowercase). Redis replies `+PONG`.
-- `SET` accepts a typed value. A client that sends the value as a bulk string
-  stores a string; a client that sends `:42` or an array stores an integer or
-  an array, and `GET` returns it with that same type. Redis always stores
-  bytes and always replies to `GET` with a bulk string.
+- Requests must be RESP arrays of non-null bulk strings (`$`). Simple strings
+  (`+`), integers (`:`), nested arrays (`*`), and null bulk strings (`$-1`)
+  inside a command are protocol errors.
+- `GET` returns a bulk string or a null bulk string (`$-1`). `MGET` returns an
+  array of bulk strings and null bulk strings.
+- `PING` replies `+PONG`.
+- `INCR` and `DECR` operate on canonical signed 64-bit decimal integers and
+  return a Redis-style error when the stored value is not an integer or the
+  operation would overflow.
 - Unknown commands reply `-ERR unknown command '<name>'`. Newer `redis-cli`
   versions send `CLIENT SETINFO` when they connect. CoreKV does not implement
   it yet, so the server answers with an error for that one command.
+- Malformed requests reply `-ERR Protocol error: ...` and clear the buffered
+  input. The connection stays open.
 
 ---
 
@@ -140,23 +161,27 @@ details differ from Redis:
 
 **RESP**
 
-- RESP2 decoding for arrays, bulk strings, simple strings, and integers.
+- RESP2 request decoding for arrays of bulk strings, producing a flat
+  `RESP::DataBuffer` (`std::vector<std::string>`) for the command layer.
+- Reply encoding for simple strings, errors, integers, bulk strings, null bulk
+  strings, and arrays.
 - **Request pipelining**: every complete command in a single read is executed,
   and all replies are batched into one write.
 - **Partial frame handling**: a frame that is split across TCP segments is
   buffered and retried once the remainder arrives. This is not treated as a
   protocol error.
-- Malformed frames produce `-ERR Protocol error: ...` and discard the input.
-- `std::from_chars` for integer parsing, so no allocation and no exceptions
-  escaping from the numeric layer.
+- Malformed frames produce `-ERR Protocol error: ...`, discard the buffered
+  input, and keep the connection open.
+- `std::from_chars` for numeric parsing in the protocol and in `INCR`/`DECR`.
 
 **Storage**
 
 - Intrusive hash map with **incremental rehashing**: migration is capped per
-  operation, so a large resize never stalls the event loop.
-- **Sharded** keyspace: keys are distributed across shards by hash code.
-- Values are stored as a `std::variant` of string, 64-bit integer, and array,
-  so a key can hold more than a flat string.
+  insert, so a large resize never stalls the event loop.
+- **Sharded** keyspace: a 64-bit FNV-1a hash distributes keys across shards.
+- Keys and values are stored as `std::string`; every value is an opaque byte
+  string, with no variant or type tag in the storage layer.
+- `DEL` detaches a key from the hash table before freeing its entry.
 - Bucket counts stay powers of two; the table uses `hash & (bucket_count - 1)`.
 
 ---
@@ -166,11 +191,10 @@ details differ from Redis:
 ```text
 src/
 ├── command/    command dispatch and per-command handlers
-├── common/     shared value types and hashing helpers
-├── db/         hash map, sharded database
-├── net/        RAII socket and epoll wrappers
+├── db/         intrusive hash map, sharded database, FNV-1a hashing
+├── net/        RAII socket, listener, and epoll wrappers
 ├── parser/     RESP decoding/encoding and connection I/O
-├── server/     event loop and connection ownership
+├── server/     epoll event loop and client lifecycle
 └── main.cpp    application entry point
 ```
 
@@ -178,6 +202,8 @@ src/
 
 ## Design rules
 
+- Command requests are RESP arrays of bulk strings, decoded into
+  `RESP::DataBuffer = std::vector<std::string>`.
 - Every file descriptor is owned by an RAII type. Copying is deleted; moving
   transfers ownership.
 - Each accepted connection is a heap-allocated `ClientObject`; epoll stores its
@@ -186,15 +212,17 @@ src/
   client registry, which keeps separate event loops independent.
 - Bucket counts in the hash table must stay powers of two.
 - Incomplete input is never a protocol error. Only genuinely malformed frames
-  are.
+  are; those clear the buffered input and reply with a protocol error without
+  closing the connection.
+- The server runs on one thread. Per-shard locking is deferred until
+  multi-threaded workers are added.
 
 ---
 
 ## Roadmap
 
 - **Expiration**: `EXPIRE`, `TTL`, `PERSIST`, with lazy plus active expiry.
-- **Keyspace commands**: `EXISTS`, `TYPE`, `DBSIZE`, `KEYS`, `SCAN`,
-  `RENAME`, `MSET`/`MGET`.
+- **Keyspace commands**: `TYPE`, `DBSIZE`, `KEYS`, `SCAN`, `UNLINK`.
 - **More data types**: list, hash, set, sorted set.
 - **Persistence**: RDB snapshots and an append-only file.
 - **Replication**: `PSYNC` and the replication stream.
