@@ -306,10 +306,29 @@ void handle_rename(net::ClientObject &client, const RESP::DataBuffer &args) {
 
   entry->key = new_key;
   entry->node.h_code = hash_key(new_key);
-  
+
   // Insert the entry into new bucket
   db::database.insert(&entry->node);
 
+  RESP::encode_simple_string(client, "OK");
+}
+
+void handle_mset(net::ClientObject &client, const RESP::DataBuffer &args) {
+  if (args.size() < 3 || args.size() % 2 == 0) {
+    encode_wrong_arity(client, "mset");
+    return;
+  }
+
+  for (size_t i = 1; i < args.size() - 1; i += 2) {
+    const std::string &key = args[i];
+    const std::string &val = args[i + 1];
+
+    if (db::Entry *entry = find_entry(key)) {
+      entry->val = val;
+    } else {
+      insert_entry(key, val);
+    }
+  }
   RESP::encode_simple_string(client, "OK");
 }
 
@@ -340,6 +359,8 @@ void execute_command(net::ClientObject &client, const RESP::DataBuffer &args) {
     handle_exists(client, args);
   } else if (equals_ignore_case(cmd, "rename")) {
     handle_rename(client, args);
+  } else if (equals_ignore_case(cmd, "mset")) {
+    handle_mset(client, args);
   } else {
     RESP::encode_simple_error(client, "ERR unknown command '" + cmd + "'");
   }
